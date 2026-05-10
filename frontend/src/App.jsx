@@ -1,19 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle } from 'lucide-react';
+import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft } from 'lucide-react';
 import { supabase } from './supabaseClient';
+import Login from './components/Login';
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const [medicines, setMedicines] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   
+  // History State
+  const [selectedHistoryCustomer, setSelectedHistoryCustomer] = useState(null);
+  const [customerHistory, setCustomerHistory] = useState([]);
+  
   // Sale Form State
   const [selectedMedId, setSelectedMedId] = useState('');
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,6 +40,7 @@ function App() {
   const [newMedName, setNewMedName] = useState('');
   const [newMedCategory, setNewMedCategory] = useState('');
   const [newMedPrice, setNewMedPrice] = useState('');
+  const [newMedSupplierName, setNewMedSupplierName] = useState('');
 
   const showToast = (msg) => {
     setToast(msg);
@@ -95,6 +103,14 @@ function App() {
       }
       setExpiryAlerts(alertsData || []);
 
+      // Suppliers
+      let { data: suppData, error: suppError } = await supabase.from('suppliers').select('*');
+      if (suppError && suppError.code === '42P01') {
+        const res = await supabase.from('Suppliers').select('*');
+        suppData = res.data;
+      }
+      setSuppliers(suppData || []);
+
     } catch (err) {
       console.error('Failed to fetch data', err);
     } finally {
@@ -102,14 +118,133 @@ function App() {
     }
   };
 
+  const fetchCustomerHistory = async (customer) => {
+    try {
+      setLoading(true);
+      setSelectedHistoryCustomer(customer);
+      setActiveTab('customer_history');
+      
+      let { data, error } = await supabase
+        .from('sales')
+        .select(`
+          sale_id, sale_date, total_amount,
+          sales_items ( quantity, subtotal, medicines (medicine_name) )
+        `)
+        .eq('customer_id', customer.customer_id)
+        .order('sale_date', { ascending: false });
+
+      if (error && error.code === '42P01') {
+         const res = await supabase
+          .from('Sales')
+          .select(`
+            sale_id, sale_date, total_amount,
+            Sales_Items ( quantity, subtotal, Medicines (medicine_name) )
+          `)
+          .eq('customer_id', customer.customer_id)
+          .order('sale_date', { ascending: false });
+          data = res.data;
+          error = res.error;
+      }
+
+      if (error) throw error;
+      setCustomerHistory(data || []);
+    } catch (err) {
+      console.error('Error fetching history:', err);
+      showToast('Failed to load customer history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchData();
+    const savedSession = localStorage.getItem('nexus_session');
+    if (savedSession) {
+      try {
+        const user = JSON.parse(savedSession);
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+      } catch (e) {
+        // Invalid session data
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchData();
+    }
+  }, [isAuthenticated]);
+
+  const handleGuestLogin = async (mockUser) => {
+    await processLogin(mockUser.name, mockUser.email, mockUser.role);
+  };
+
+  const processLogin = async (name, email, role) => {
+    try {
+      let autoCustomerId = null;
+      if (role === 'Customer') {
+        // 1. Check if customer exists by email
+        let { data: existingCust, error: checkErr } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('email', email)
+          .single();
+          
+        if (checkErr && checkErr.code === '42P01') {
+          const res = await supabase.from('Customers').select('*').eq('email', email).single();
+          existingCust = res.data;
+          checkErr = res.error;
+        }
+
+        // 2. If not found, insert them
+        if (!existingCust && (checkErr?.code === 'PGRST116' || !checkErr)) {
+          let { data: newCust, error: insertErr } = await supabase.from('customers').insert({
+            customer_name: name,
+            email: email,
+            phone: ''
+          }).select().single();
+          
+          if (insertErr && insertErr.code === '42P01') {
+            const res = await supabase.from('Customers').insert({ customer_name: name, email: email, phone: '' }).select().single();
+            newCust = res.data;
+          }
+          autoCustomerId = newCust?.customer_id;
+        } else if (existingCust) {
+          autoCustomerId = existingCust.customer_id;
+        }
+      }
+
+      const userObj = { name, email, role, customer_id: autoCustomerId };
+      setCurrentUser(userObj);
+      setIsAuthenticated(true);
+      localStorage.setItem('nexus_session', JSON.stringify(userObj));
+      showToast(`Welcome, ${name}!`);
+
+      setActiveTab('dashboard');
+    } catch (err) {
+      console.error('Login processing error', err);
+    }
+  };
+
+  const handleLogout = async () => {
+    localStorage.removeItem('nexus_session');
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+  };
 
   // --- Handlers ---
   const handleSale = async (e) => {
     e.preventDefault();
-    if (!selectedMedId || !selectedCustomerId || !selectedEmployeeId || quantity < 1) return;
+    
+    // Auto-detect customer ID based on logged in user
+    const currentCustomer = customers.find(c => c.email === currentUser?.email);
+    if (!currentCustomer) {
+      alert("Error: Logged-in customer record not found in database.");
+      return;
+    }
+    const autoCustomerId = currentCustomer.customer_id;
+
+    if (!selectedMedId || !selectedEmployeeId || quantity < 1) return;
 
     setIsSubmitting(true);
     const med = medicines.find(m => m.medicine_id === parseInt(selectedMedId));
@@ -118,13 +253,13 @@ function App() {
 
     try {
       let { data: saleData, error: saleError } = await supabase.from('sales').insert({
-        customer_id: parseInt(selectedCustomerId),
+        customer_id: parseInt(autoCustomerId),
         employee_id: parseInt(selectedEmployeeId),
         total_amount: totalAmount
       }).select('sale_id').single();
 
       if (saleError && saleError.code === '42P01') {
-        const res = await supabase.from('Sales').insert({ customer_id: parseInt(selectedCustomerId), employee_id: parseInt(selectedEmployeeId), total_amount: totalAmount }).select('sale_id').single();
+        const res = await supabase.from('Sales').insert({ customer_id: parseInt(autoCustomerId), employee_id: parseInt(selectedEmployeeId), total_amount: totalAmount }).select('sale_id').single();
         saleData = res.data; saleError = res.error;
       }
       if (saleError) throw saleError;
@@ -189,16 +324,54 @@ function App() {
 
   const handleAddMedicine = async (e) => {
     e.preventDefault();
+    if (!newMedSupplierName.trim()) {
+      alert('Please enter a supplier name');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      let { error } = await supabase.from('medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: 1 });
+      let supplierIdToUse = null;
+      
+      // Check if supplier exists (case insensitive)
+      let { data: existingSupp, error: suppErr } = await supabase
+        .from('suppliers')
+        .select('supplier_id')
+        .ilike('supplier_name', newMedSupplierName.trim())
+        .maybeSingle();
+
+      if (suppErr && suppErr.code === '42P01') {
+        const res = await supabase.from('Suppliers').select('supplier_id').ilike('supplier_name', newMedSupplierName.trim()).maybeSingle();
+        existingSupp = res.data;
+        suppErr = res.error;
+      }
+
+      if (existingSupp) {
+        supplierIdToUse = existingSupp.supplier_id;
+      } else {
+        // Create new supplier
+        let { data: newSupp, error: insertSuppErr } = await supabase
+          .from('suppliers')
+          .insert({ supplier_name: newMedSupplierName.trim() })
+          .select('supplier_id')
+          .single();
+
+        if (insertSuppErr && insertSuppErr.code === '42P01') {
+          const res = await supabase.from('Suppliers').insert({ supplier_name: newMedSupplierName.trim() }).select('supplier_id').single();
+          newSupp = res.data;
+          insertSuppErr = res.error;
+        }
+        if (insertSuppErr) throw insertSuppErr;
+        supplierIdToUse = newSupp.supplier_id;
+      }
+
+      let { error } = await supabase.from('medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: supplierIdToUse });
       if (error && error.code === '42P01') {
-        const res = await supabase.from('Medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: 1 });
+        const res = await supabase.from('Medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: supplierIdToUse });
         error = res.error;
       }
       if (error) throw error;
       showToast('Medicine added successfully! Stock row auto-created.');
-      setNewMedName(''); setNewMedCategory(''); setNewMedPrice('');
+      setNewMedName(''); setNewMedCategory(''); setNewMedPrice(''); setNewMedSupplierName('');
       fetchData();
     } catch (err) {
       alert('Error: ' + err.message);
@@ -280,13 +453,6 @@ function App() {
           <h2><ShoppingCart className="icon" /> Record Sale</h2>
           <form onSubmit={handleSale}>
             <div className="form-group">
-              <label><Users size={16} style={{display:'inline', verticalAlign:'text-bottom'}}/> Customer</label>
-              <select className="form-control" value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} required>
-                <option value="" disabled>Select...</option>
-                {customers.map(c => <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
               <label><BadgeCheck size={16} style={{display:'inline', verticalAlign:'text-bottom'}}/> Employee</label>
               <select className="form-control" value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)} required>
                 <option value="" disabled>Select...</option>
@@ -306,7 +472,7 @@ function App() {
               <label>Quantity</label>
               <input type="number" className="form-control" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} required />
             </div>
-            <button type="submit" className="btn" disabled={isSubmitting || !selectedMedId || !selectedCustomerId || !selectedEmployeeId}>
+            <button type="submit" className="btn" disabled={isSubmitting || !selectedMedId || !selectedEmployeeId}>
               {isSubmitting ? 'Processing...' : <><Activity size={20} /> Execute Sale</>}
             </button>
           </form>
@@ -322,13 +488,18 @@ function App() {
         {loading ? <p>Loading...</p> : (
           <div style={{ overflowX: 'auto' }}>
             <table>
-              <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>
+              <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Action</th></tr></thead>
               <tbody>
                 {customers.map(c => (
                   <tr key={c.customer_id}>
                     <td>{c.customer_id}</td>
                     <td style={{ fontWeight: 500, color: '#fff' }}>{c.customer_name}</td>
                     <td>{c.phone}</td><td>{c.email || 'N/A'}</td>
+                    <td>
+                      <button onClick={() => fetchCustomerHistory(c)} style={{background:'transparent', border:'none', cursor:'pointer', padding:'4px'}} title="View Purchase History">
+                        <History size={18} color="#a78bfa" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -441,17 +612,89 @@ function App() {
             <label>Price (₹)</label>
             <input type="number" step="0.01" className="form-control" value={newMedPrice} onChange={e=>setNewMedPrice(e.target.value)} required />
           </div>
-          <button type="submit" className="btn" disabled={isSubmitting}>Add Medicine</button>
+          <div className="form-group">
+            <label>Supplier Name</label>
+            <input type="text" className="form-control" placeholder="Enter supplier name" value={newMedSupplierName} onChange={e=>setNewMedSupplierName(e.target.value)} required />
+          </div>
+          <button type="submit" className="btn" disabled={isSubmitting || !newMedSupplierName.trim()}>Add Medicine</button>
         </form>
       </section>
     </div>
   );
 
+  const renderCustomerHistory = () => (
+    <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+      <section className="card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
+          <button onClick={() => setActiveTab('customers')} className="btn-text" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, padding: '0.5rem' }}>
+            <ArrowLeft size={18} /> Back to Customers
+          </button>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><History className="icon" /> Purchase History for {selectedHistoryCustomer?.customer_name}</h2>
+        </div>
+        
+        {loading ? <p>Loading history...</p> : customerHistory.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)' }}>No past purchases found for this customer.</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Sale ID</th>
+                  <th>Total Amount</th>
+                  <th>Items Purchased</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerHistory.map(sale => {
+                  const items = sale.sales_items || sale.Sales_Items || [];
+                  return (
+                    <tr key={sale.sale_id}>
+                      <td>{new Date(sale.sale_date).toLocaleDateString()} {new Date(sale.sale_date).toLocaleTimeString()}</td>
+                      <td>#{sale.sale_id}</td>
+                      <td style={{ fontWeight: 500, color: '#fff' }}>₹{sale.total_amount}</td>
+                      <td>
+                        <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                          {items.map((item, idx) => {
+                            const med = item.medicines || item.Medicines || {};
+                            return (
+                              <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                                {item.quantity}x <strong style={{color: '#e2e8f0'}}>{med.medicine_name || 'Unknown Item'}</strong> <span style={{fontSize:'0.8rem'}}>(₹{item.subtotal})</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleGuestLogin} />;
+  }
+
   return (
     <div className="container">
       <header className="header">
-        <h1>Nexus Pharmacy</h1>
-        <p>Advanced Real-Time Inventory & Management System</p>
+        <div>
+          <h1>Nexus Pharmacy</h1>
+          <p>Advanced Real-Time Inventory & Management System</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
+            Logged in as <strong style={{ color: '#fff' }}>{currentUser?.name}</strong> <span style={{opacity: 0.6}}>({currentUser?.role})</span>
+          </span>
+          <button className="btn-logout" onClick={handleLogout}>
+            <LogOut size={18} /> Logout
+          </button>
+        </div>
       </header>
 
       <nav className="nav-tabs">
@@ -461,9 +704,11 @@ function App() {
         <button className={`nav-tab ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => setActiveTab('customers')}>
           <Users size={18} /> Customers
         </button>
-        <button className={`nav-tab ${activeTab === 'employees' ? 'active' : ''}`} onClick={() => setActiveTab('employees')}>
-          <BadgeCheck size={18} /> Employees
-        </button>
+        {currentUser?.role === 'Manager' && (
+          <button className={`nav-tab ${activeTab === 'employees' ? 'active' : ''}`} onClick={() => setActiveTab('employees')}>
+            <BadgeCheck size={18} /> Employees
+          </button>
+        )}
         <button className={`nav-tab ${activeTab === 'medicines' ? 'active' : ''}`} onClick={() => setActiveTab('medicines')}>
           <Pill size={18} /> Medicines
         </button>
@@ -471,8 +716,9 @@ function App() {
 
       {activeTab === 'dashboard' && renderDashboard()}
       {activeTab === 'customers' && renderCustomers()}
-      {activeTab === 'employees' && renderEmployees()}
+      {activeTab === 'employees' && currentUser?.role === 'Manager' && renderEmployees()}
       {activeTab === 'medicines' && renderMedicines()}
+      {activeTab === 'customer_history' && renderCustomerHistory()}
 
       {toast && (
         <div className="toast">
