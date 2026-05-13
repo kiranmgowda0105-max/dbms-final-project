@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft } from 'lucide-react';
+import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft, Printer, X, FileText } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 
@@ -18,6 +18,7 @@ function App() {
   // History State
   const [selectedHistoryCustomer, setSelectedHistoryCustomer] = useState(null);
   const [customerHistory, setCustomerHistory] = useState([]);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
   
   // Sale Form State
   const [selectedMedId, setSelectedMedId] = useState('');
@@ -41,6 +42,7 @@ function App() {
   const [newMedCategory, setNewMedCategory] = useState('');
   const [newMedPrice, setNewMedPrice] = useState('');
   const [newMedSupplierName, setNewMedSupplierName] = useState('');
+  const [newMedExpiryDate, setNewMedExpiryDate] = useState('');
 
   const showToast = (msg) => {
     setToast(msg);
@@ -128,6 +130,7 @@ function App() {
         .from('sales')
         .select(`
           sale_id, sale_date, total_amount,
+          employees (employee_name),
           sales_items ( quantity, subtotal, medicines (medicine_name) )
         `)
         .eq('customer_id', customer.customer_id)
@@ -138,6 +141,7 @@ function App() {
           .from('Sales')
           .select(`
             sale_id, sale_date, total_amount,
+            Employees (employee_name),
             Sales_Items ( quantity, subtotal, Medicines (medicine_name) )
           `)
           .eq('customer_id', customer.customer_id)
@@ -157,7 +161,7 @@ function App() {
   };
 
   useEffect(() => {
-    const savedSession = localStorage.getItem('nexus_session');
+    const savedSession = localStorage.getItem('nexus_session') || sessionStorage.getItem('nexus_session');
     if (savedSession) {
       try {
         const user = JSON.parse(savedSession);
@@ -175,59 +179,23 @@ function App() {
     }
   }, [isAuthenticated]);
 
-  const handleGuestLogin = async (mockUser) => {
-    await processLogin(mockUser.name, mockUser.email, mockUser.role);
-  };
-
-  const processLogin = async (name, email, role) => {
-    try {
-      let autoCustomerId = null;
-      if (role === 'Customer') {
-        // 1. Check if customer exists by email
-        let { data: existingCust, error: checkErr } = await supabase
-          .from('customers')
-          .select('*')
-          .eq('email', email)
-          .single();
-          
-        if (checkErr && checkErr.code === '42P01') {
-          const res = await supabase.from('Customers').select('*').eq('email', email).single();
-          existingCust = res.data;
-          checkErr = res.error;
-        }
-
-        // 2. If not found, insert them
-        if (!existingCust && (checkErr?.code === 'PGRST116' || !checkErr)) {
-          let { data: newCust, error: insertErr } = await supabase.from('customers').insert({
-            customer_name: name,
-            email: email,
-            phone: ''
-          }).select().single();
-          
-          if (insertErr && insertErr.code === '42P01') {
-            const res = await supabase.from('Customers').insert({ customer_name: name, email: email, phone: '' }).select().single();
-            newCust = res.data;
-          }
-          autoCustomerId = newCust?.customer_id;
-        } else if (existingCust) {
-          autoCustomerId = existingCust.customer_id;
-        }
-      }
-
-      const userObj = { name, email, role, customer_id: autoCustomerId };
-      setCurrentUser(userObj);
-      setIsAuthenticated(true);
+  const handleAuthSuccess = (userObj) => {
+    setCurrentUser(userObj);
+    setIsAuthenticated(true);
+    
+    if (userObj.rememberMe) {
       localStorage.setItem('nexus_session', JSON.stringify(userObj));
-      showToast(`Welcome, ${name}!`);
-
-      setActiveTab('dashboard');
-    } catch (err) {
-      console.error('Login processing error', err);
+    } else {
+      sessionStorage.setItem('nexus_session', JSON.stringify(userObj));
     }
+    
+    showToast(`Welcome, ${userObj.name}!`);
+    setActiveTab('dashboard');
   };
 
   const handleLogout = async () => {
     localStorage.removeItem('nexus_session');
+    sessionStorage.removeItem('nexus_session');
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
@@ -364,14 +332,26 @@ function App() {
         supplierIdToUse = newSupp.supplier_id;
       }
 
-      let { error } = await supabase.from('medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: supplierIdToUse });
+      let { data: medData, error } = await supabase.from('medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: supplierIdToUse }).select().single();
       if (error && error.code === '42P01') {
-        const res = await supabase.from('Medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: supplierIdToUse });
+        const res = await supabase.from('Medicines').insert({ medicine_name: newMedName, category: newMedCategory, price: parseFloat(newMedPrice), supplier_id: supplierIdToUse }).select().single();
+        medData = res.data;
         error = res.error;
       }
       if (error) throw error;
-      showToast('Medicine added successfully! Stock row auto-created.');
-      setNewMedName(''); setNewMedCategory(''); setNewMedPrice(''); setNewMedSupplierName('');
+      
+      // Update the auto-created stock's expiry date
+      if (newMedExpiryDate && medData) {
+        let { error: stockUpdateErr } = await supabase.from('stock').update({ expiry_date: newMedExpiryDate }).eq('medicine_id', medData.medicine_id);
+        if (stockUpdateErr && stockUpdateErr.code === '42P01') {
+           const res = await supabase.from('Stock').update({ expiry_date: newMedExpiryDate }).eq('medicine_id', medData.medicine_id);
+           stockUpdateErr = res.error;
+        }
+        if (stockUpdateErr) throw stockUpdateErr;
+      }
+
+      showToast('Medicine added successfully!');
+      setNewMedName(''); setNewMedCategory(''); setNewMedPrice(''); setNewMedSupplierName(''); setNewMedExpiryDate('');
       fetchData();
     } catch (err) {
       alert('Error: ' + err.message);
@@ -572,31 +552,54 @@ function App() {
   );
 
   const renderMedicines = () => (
-    <div className="grid">
-      <section className="card">
-        <h2><Pill className="icon" /> Medicine Master List</h2>
-        {loading ? <p>Loading...</p> : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Supplier</th><th>Price</th><th>Action</th></tr></thead>
-              <tbody>
-                {medicines.map(m => (
-                  <tr key={m.medicine_id}>
-                    <td>{m.medicine_id}</td>
-                    <td style={{ fontWeight: 500, color: '#fff' }}>{m.medicine_name}</td>
-                    <td>{m.category}</td><td>{m.supplier_name}</td><td>₹{m.price}</td>
-                    <td>
-                      <button onClick={() => handleDeleteMedicine(m.medicine_id)} style={{background:'transparent', border:'none', color:'#ef4444', cursor:'pointer', padding:'4px'}}>
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+    <>
+      {expiryAlerts.length > 0 && (
+        <div style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderLeft: '4px solid #ef4444', borderRadius: '8px' }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fca5a5', marginBottom: '0.5rem' }}>
+            <AlertTriangle size={20} /> Expiry Alerts
+          </h3>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {expiryAlerts.map(alert => (
+              <li key={alert.alert_id} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                <strong style={{color: '#fff'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="grid">
+        <section className="card">
+          <h2><Pill className="icon" /> Medicine Master List</h2>
+          {loading ? <p>Loading...</p> : (
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Supplier</th><th>Price</th><th>Expiry Date</th><th>Action</th></tr></thead>
+                <tbody>
+                  {medicines.map(m => {
+                    const isExpiring = expiryAlerts.some(alert => alert.medicine_id === m.medicine_id);
+                    return (
+                    <tr key={m.medicine_id} style={isExpiring ? { background: 'rgba(239, 68, 68, 0.15)' } : {}}>
+                      <td>{m.medicine_id}</td>
+                      <td style={{ fontWeight: 500, color: '#fff' }}>
+                        {m.medicine_name}
+                        {isExpiring && <AlertTriangle size={14} color="#ef4444" style={{marginLeft: '6px', verticalAlign: 'text-bottom'}} title="Expiring Soon" />}
+                      </td>
+                      <td>{m.category}</td><td>{m.supplier_name}</td><td>₹{m.price}</td>
+                      <td style={{ color: isExpiring ? '#ef4444' : 'inherit', fontWeight: isExpiring ? 'bold' : 'normal' }}>
+                        {m.expiry_date ? new Date(m.expiry_date).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td>
+                        <button onClick={() => handleDeleteMedicine(m.medicine_id)} style={{background:'transparent', border:'none', color:'#ef4444', cursor:'pointer', padding:'4px'}}>
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </tr>
+                  )})}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       <section className="card">
         <h2><PlusCircle className="icon" /> Add Medicine</h2>
         <form onSubmit={handleAddMedicine}>
@@ -616,10 +619,15 @@ function App() {
             <label>Supplier Name</label>
             <input type="text" className="form-control" placeholder="Enter supplier name" value={newMedSupplierName} onChange={e=>setNewMedSupplierName(e.target.value)} required />
           </div>
-          <button type="submit" className="btn" disabled={isSubmitting || !newMedSupplierName.trim()}>Add Medicine</button>
+          <div className="form-group">
+            <label>Expiry Date</label>
+            <input type="date" className="form-control" value={newMedExpiryDate} onChange={e=>setNewMedExpiryDate(e.target.value)} required />
+          </div>
+          <button type="submit" className="btn" disabled={isSubmitting || !newMedSupplierName.trim() || !newMedExpiryDate}>Add Medicine</button>
         </form>
       </section>
-    </div>
+      </div>
+    </>
   );
 
   const renderCustomerHistory = () => (
@@ -643,6 +651,7 @@ function App() {
                   <th>Sale ID</th>
                   <th>Total Amount</th>
                   <th>Items Purchased</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -665,6 +674,11 @@ function App() {
                           })}
                         </ul>
                       </td>
+                      <td>
+                        <button onClick={() => setSelectedReceipt(sale)} className="btn-text" style={{ color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <FileText size={16} /> Receipt
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -676,8 +690,77 @@ function App() {
     </div>
   );
 
+  const renderReceiptModal = () => {
+    if (!selectedReceipt) return null;
+    const items = selectedReceipt.sales_items || selectedReceipt.Sales_Items || [];
+    const empData = selectedReceipt.employees || selectedReceipt.Employees;
+    const employeeName = empData ? (Array.isArray(empData) ? empData[0]?.employee_name : empData.employee_name) : 'Unknown';
+
+    return (
+      <div className="modal-overlay">
+        <div className="modal-content receipt-modal">
+          <button className="modal-close no-print" onClick={() => setSelectedReceipt(null)}><X size={24} /></button>
+          
+          <div className="receipt-header">
+            <h2>Nexus Pharmacy</h2>
+            <p>123 Health Avenue, Med City</p>
+            <p>Tel: +91 98765 43210</p>
+            <div className="receipt-divider"></div>
+          </div>
+          
+          <div className="receipt-details">
+            <p><strong>Receipt No:</strong> #{selectedReceipt.sale_id}</p>
+            <p><strong>Date:</strong> {new Date(selectedReceipt.sale_date).toLocaleString()}</p>
+            <p><strong>Customer:</strong> {selectedHistoryCustomer?.customer_name}</p>
+            <p><strong>Cashier:</strong> {employeeName}</p>
+          </div>
+          
+          <div className="receipt-divider"></div>
+          
+          <table className="receipt-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => {
+                const med = item.medicines || item.Medicines || {};
+                return (
+                  <tr key={idx}>
+                    <td>{med.medicine_name || 'Item'}</td>
+                    <td>{item.quantity}</td>
+                    <td>₹{item.subtotal}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          
+          <div className="receipt-divider"></div>
+          
+          <div className="receipt-total">
+            <h3>TOTAL</h3>
+            <h3>₹{selectedReceipt.total_amount}</h3>
+          </div>
+          
+          <div className="receipt-footer">
+            <p>Thank you for your purchase!</p>
+            <p>Get well soon.</p>
+          </div>
+
+          <div className="no-print" style={{ marginTop: '2rem', textAlign: 'center' }}>
+            <button className="btn" onClick={() => window.print()}><Printer size={18} /> Print Receipt</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleGuestLogin} />;
+    return <Login onLoginSuccess={handleAuthSuccess} />;
   }
 
   return (
@@ -719,6 +802,8 @@ function App() {
       {activeTab === 'employees' && currentUser?.role === 'Manager' && renderEmployees()}
       {activeTab === 'medicines' && renderMedicines()}
       {activeTab === 'customer_history' && renderCustomerHistory()}
+
+      {renderReceiptModal()}
 
       {toast && (
         <div className="toast">
