@@ -387,14 +387,14 @@ function App() {
   const renderDashboard = () => (
     <>
       {expiryAlerts.length > 0 && (
-        <div style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderLeft: '4px solid #ef4444', borderRadius: '8px' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fca5a5', marginBottom: '0.5rem' }}>
+        <div style={{ marginBottom: '1.5rem', padding: '0.85rem 1rem', background: 'rgba(239, 68, 68, 0.08)', borderLeft: '3px solid #EF4444', borderRadius: '8px' }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#FCA5A5', marginBottom: '0.4rem', fontSize: '0.9rem', fontWeight: 600 }}>
             <AlertTriangle size={20} /> Expiry Alerts
           </h3>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {expiryAlerts.map(alert => (
               <li key={alert.alert_id} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>
-                <strong style={{color: '#fff'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
+                <strong style={{color: '#F1F5F9'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
               </li>
             ))}
           </ul>
@@ -417,7 +417,7 @@ function App() {
                     const stock = parseInt(med.stock_quantity) || 0;
                     return (
                       <tr key={med.medicine_id}>
-                        <td style={{ fontWeight: 500, color: '#fff' }}>{med.medicine_name}</td>
+                        <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{med.medicine_name}</td>
                         <td>{med.category}</td><td>₹{med.price}</td><td>{stock}</td>
                         <td>{stock < 20 ? <span className="badge low-stock">Low Stock</span> : <span className="badge in-stock">In Stock</span>}</td>
                       </tr>
@@ -473,11 +473,11 @@ function App() {
                 {customers.map(c => (
                   <tr key={c.customer_id}>
                     <td>{c.customer_id}</td>
-                    <td style={{ fontWeight: 500, color: '#fff' }}>{c.customer_name}</td>
+                    <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{c.customer_name}</td>
                     <td>{c.phone}</td><td>{c.email || 'N/A'}</td>
                     <td>
                       <button onClick={() => fetchCustomerHistory(c)} style={{background:'transparent', border:'none', cursor:'pointer', padding:'4px'}} title="View Purchase History">
-                        <History size={18} color="#a78bfa" />
+                        <History size={18} color="#14b8a6" />
                       </button>
                     </td>
                   </tr>
@@ -520,8 +520,8 @@ function App() {
                 {employees.map(e => (
                   <tr key={e.employee_id}>
                     <td>{e.employee_id}</td>
-                    <td style={{ fontWeight: 500, color: '#fff' }}>{e.employee_name}</td>
-                    <td><span className="badge" style={{background:'rgba(59, 130, 246, 0.2)', color:'#93c5fd', border:'1px solid rgba(59, 130, 246, 0.3)'}}>{e.role}</span></td>
+                    <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{e.employee_name}</td>
+                    <td><span className="badge" style={{background:'rgba(13,148,136,0.08)', color:'#5EEAD4', border:'1px solid rgba(13,148,136,0.2)'}}>{e.role}</span></td>
                     <td>{e.salary}</td>
                   </tr>
                 ))}
@@ -554,14 +554,14 @@ function App() {
   const renderMedicines = () => (
     <>
       {expiryAlerts.length > 0 && (
-        <div style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderLeft: '4px solid #ef4444', borderRadius: '8px' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fca5a5', marginBottom: '0.5rem' }}>
+        <div style={{ marginBottom: '1.5rem', padding: '0.85rem 1rem', background: 'rgba(239, 68, 68, 0.08)', borderLeft: '3px solid #EF4444', borderRadius: '8px' }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#FCA5A5', marginBottom: '0.4rem', fontSize: '0.9rem', fontWeight: 600 }}>
             <AlertTriangle size={20} /> Expiry Alerts
           </h3>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {expiryAlerts.map(alert => (
               <li key={alert.alert_id} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>
-                <strong style={{color: '#fff'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
+                <strong style={{color: '#F1F5F9'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
               </li>
             ))}
           </ul>
@@ -578,18 +578,18 @@ function App() {
                   {medicines.map(m => {
                     const isExpiring = expiryAlerts.some(alert => alert.medicine_id === m.medicine_id);
                     return (
-                    <tr key={m.medicine_id} style={isExpiring ? { background: 'rgba(239, 68, 68, 0.15)' } : {}}>
+                    <tr key={m.medicine_id} style={isExpiring ? { background: 'rgba(239, 68, 68, 0.06)' } : {}}>
                       <td>{m.medicine_id}</td>
-                      <td style={{ fontWeight: 500, color: '#fff' }}>
+                      <td style={{ fontWeight: 500, color: '#F1F5F9' }}>
                         {m.medicine_name}
-                        {isExpiring && <AlertTriangle size={14} color="#ef4444" style={{marginLeft: '6px', verticalAlign: 'text-bottom'}} title="Expiring Soon" />}
+                        {isExpiring && <AlertTriangle size={14} color="#EF4444" style={{marginLeft: '6px', verticalAlign: 'text-bottom'}} title="Expiring Soon" />}
                       </td>
                       <td>{m.category}</td><td>{m.supplier_name}</td><td>₹{m.price}</td>
-                      <td style={{ color: isExpiring ? '#ef4444' : 'inherit', fontWeight: isExpiring ? 'bold' : 'normal' }}>
+                      <td style={{ color: isExpiring ? '#EF4444' : 'inherit', fontWeight: isExpiring ? 600 : 'normal' }}>
                         {m.expiry_date ? new Date(m.expiry_date).toLocaleDateString() : 'N/A'}
                       </td>
                       <td>
-                        <button onClick={() => handleDeleteMedicine(m.medicine_id)} style={{background:'transparent', border:'none', color:'#ef4444', cursor:'pointer', padding:'4px'}}>
+                        <button onClick={() => handleDeleteMedicine(m.medicine_id)} style={{background:'transparent', border:'none', color:'#EF4444', cursor:'pointer', padding:'4px'}}>
                           <Trash2 size={18} />
                         </button>
                       </td>
@@ -661,21 +661,21 @@ function App() {
                     <tr key={sale.sale_id}>
                       <td>{new Date(sale.sale_date).toLocaleDateString()} {new Date(sale.sale_date).toLocaleTimeString()}</td>
                       <td>#{sale.sale_id}</td>
-                      <td style={{ fontWeight: 500, color: '#fff' }}>₹{sale.total_amount}</td>
+                      <td style={{ fontWeight: 600, color: '#F1F5F9' }}>₹{sale.total_amount}</td>
                       <td>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                           {items.map((item, idx) => {
                             const med = item.medicines || item.Medicines || {};
                             return (
                               <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                                {item.quantity}x <strong style={{color: '#e2e8f0'}}>{med.medicine_name || 'Unknown Item'}</strong> <span style={{fontSize:'0.8rem'}}>(₹{item.subtotal})</span>
+                                {item.quantity}x <strong style={{color: '#F1F5F9'}}>{med.medicine_name || 'Unknown Item'}</strong> <span style={{fontSize:'0.8rem', color:'#64748B'}}>(₹{item.subtotal})</span>
                               </li>
                             );
                           })}
                         </ul>
                       </td>
                       <td>
-                        <button onClick={() => setSelectedReceipt(sale)} className="btn-text" style={{ color: '#a78bfa', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <button onClick={() => setSelectedReceipt(sale)} className="btn-text" style={{ color: '#14b8a6', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                           <FileText size={16} /> Receipt
                         </button>
                       </td>
@@ -771,8 +771,8 @@ function App() {
           <p>Advanced Real-Time Inventory & Management System</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
-            Logged in as <strong style={{ color: '#fff' }}>{currentUser?.name}</strong> <span style={{opacity: 0.6}}>({currentUser?.role})</span>
+          <span style={{ color: '#64748B', fontSize: '0.82rem' }}>
+            Logged in as <strong style={{ color: '#F1F5F9' }}>{currentUser?.name}</strong> <span style={{opacity: 0.5}}>({currentUser?.role})</span>
           </span>
           <button className="btn-logout" onClick={handleLogout}>
             <LogOut size={18} /> Logout

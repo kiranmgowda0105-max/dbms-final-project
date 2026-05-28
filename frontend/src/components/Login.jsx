@@ -126,18 +126,18 @@ const Login = ({ onLoginSuccess }) => {
           <p>Please enter your details to {loginMode === 'customer' && isSignUp ? 'create an account' : 'sign in'}.</p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', background: 'rgba(15, 23, 42, 0.6)', padding: '0.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ display: 'flex', gap: '2px', marginBottom: '1.5rem', background: '#161B26', padding: '3px', borderRadius: '8px' }}>
           <button 
             type="button" 
             onClick={() => { setLoginMode('customer'); setError(null); }}
-            style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: 'none', background: loginMode === 'customer' ? '#6366f1' : 'transparent', color: loginMode === 'customer' ? '#fff' : '#94a3b8', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 500 }}
+            style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: loginMode === 'customer' ? 'none' : '1px solid rgba(255,255,255,0.07)', background: loginMode === 'customer' ? '#0d9488' : 'transparent', color: loginMode === 'customer' ? '#fff' : '#64748B', cursor: 'pointer', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontWeight: 500, fontSize: '0.86rem' }}
           >
             <User size={16} /> Customer
           </button>
           <button 
             type="button" 
             onClick={() => { setLoginMode('manager'); setError(null); }}
-            style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: 'none', background: loginMode === 'manager' ? '#6366f1' : 'transparent', color: loginMode === 'manager' ? '#fff' : '#94a3b8', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 500 }}
+            style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: loginMode === 'manager' ? 'none' : '1px solid rgba(255,255,255,0.07)', background: loginMode === 'manager' ? '#0d9488' : 'transparent', color: loginMode === 'manager' ? '#fff' : '#64748B', cursor: 'pointer', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontWeight: 500, fontSize: '0.86rem' }}
           >
             <Shield size={16} /> Manager
           </button>
@@ -197,10 +197,10 @@ const Login = ({ onLoginSuccess }) => {
             <button 
               type="button" 
               onClick={() => setRememberMe(!rememberMe)}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 0 }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 0 }}
             >
-              {rememberMe ? <CheckSquare size={16} color="#6366f1" /> : <Square size={16} />}
-              <span style={{ fontSize: '0.9rem' }}>Remember Me</span>
+              {rememberMe ? <CheckSquare size={16} color="#0d9488" /> : <Square size={16} />}
+              <span style={{ fontSize: '0.86rem' }}>Remember Me</span>
             </button>
           </div>
 
@@ -212,20 +212,20 @@ const Login = ({ onLoginSuccess }) => {
         </form>
 
         {loginMode === 'customer' && (
-          <div style={{ textAlign: 'center', fontSize: '0.9rem', color: '#94a3b8' }}>
+          <div style={{ textAlign: 'center', fontSize: '0.86rem', color: '#64748B' }}>
             {isSignUp ? "Already have an account? " : "Don't have an account? "}
-            <button onClick={() => { setIsSignUp(!isSignUp); setError(null); }} className="btn-text" style={{ color: '#6366f1' }}>
+            <button onClick={() => { setIsSignUp(!isSignUp); setError(null); }} className="btn-text" style={{ color: '#14b8a6' }}>
               {isSignUp ? 'Sign In' : 'Sign Up'}
             </button>
           </div>
         )}
 
         {loginMode === 'manager' && (
-          <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(30, 41, 59, 0.5)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.85rem' }}>
-            <p style={{ margin: '0 0 0.5rem 0', color: '#94a3b8', fontWeight: 'bold' }}>Manager Credentials:</p>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-              <span style={{ color: '#cbd5e1' }}>Admin:</span>
-              <code style={{ background: '#0f172a', padding: '2px 6px', borderRadius: '4px', color: '#34d399' }}>admin / 123</code>
+          <div style={{ marginTop: '1.25rem', padding: '0.75rem 0.85rem', background: 'rgba(13, 148, 136, 0.08)', borderRadius: '8px', border: '1px solid rgba(13, 148, 136, 0.15)', fontSize: '0.8rem' }}>
+            <p style={{ margin: '0 0 0.35rem 0', color: '#CBD5E1', fontWeight: 600 }}>Manager Credentials:</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#64748B' }}>Admin:</span>
+              <code style={{ background: '#161B26', padding: '2px 8px', borderRadius: '4px', color: '#0d9488', fontWeight: 600, fontSize: '0.82rem' }}>admin / 123</code>
             </div>
           </div>
         )}
