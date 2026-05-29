@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft, Printer, X, FileText } from 'lucide-react';
+import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft, Printer, X, FileText, ClipboardList, Truck } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 
@@ -26,12 +26,13 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // Sale Customer Selection
-  const [saleCustomerMode, setSaleCustomerMode] = useState('existing');
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  // Sale Customer Input (always manual)
   const [saleNewCustName, setSaleNewCustName] = useState('');
   const [saleNewCustPhone, setSaleNewCustPhone] = useState('');
   const [saleNewCustEmail, setSaleNewCustEmail] = useState('');
+
+  // My Sales History (employee view)
+  const [mySales, setMySales] = useState([]);
 
   // Restock State
   const [restockMedId, setRestockMedId] = useState('');
@@ -42,10 +43,12 @@ function App() {
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const [newCustomerEmail, setNewCustomerEmail] = useState('');
 
-  // New Employee State
+  // New Employee State (manager adds employees with login credentials)
   const [newEmployeeName, setNewEmployeeName] = useState('');
   const [newEmployeeRole, setNewEmployeeRole] = useState('');
   const [newEmployeeSalary, setNewEmployeeSalary] = useState('');
+  const [newEmployeeEmail, setNewEmployeeEmail] = useState('');
+  const [newEmployeePassword, setNewEmployeePassword] = useState('');
 
   // New Medicine State
   const [newMedName, setNewMedName] = useState('');
@@ -53,6 +56,7 @@ function App() {
   const [newMedPrice, setNewMedPrice] = useState('');
   const [newMedSupplierName, setNewMedSupplierName] = useState('');
   const [newMedExpiryDate, setNewMedExpiryDate] = useState('');
+  const [newMedQty, setNewMedQty] = useState('');
 
   const showToast = (msg) => {
     setToast(msg);
@@ -316,11 +320,35 @@ function App() {
       return;
     }
 
-    // Resolve customer ID
-    let customerId;
-    if (saleCustomerMode === 'new') {
-      if (!saleNewCustName.trim()) { alert("Customer name is required."); return; }
-      try {
+    if (!saleNewCustName.trim()) { alert("Customer name is required."); return; }
+    if (!selectedMedId || quantity < 1) return;
+
+    setIsSubmitting(true);
+
+    try {
+      // Auto-detect: check if customer already exists by phone or email
+      let customerId = null;
+      
+      if (saleNewCustPhone.trim()) {
+        let { data: existingByPhone } = await supabase
+          .from('customers')
+          .select('customer_id')
+          .eq('phone', saleNewCustPhone.trim())
+          .maybeSingle();
+        if (existingByPhone) customerId = existingByPhone.customer_id;
+      }
+      
+      if (!customerId && saleNewCustEmail.trim()) {
+        let { data: existingByEmail } = await supabase
+          .from('customers')
+          .select('customer_id')
+          .eq('email', saleNewCustEmail.trim())
+          .maybeSingle();
+        if (existingByEmail) customerId = existingByEmail.customer_id;
+      }
+
+      // If customer not found, create new
+      if (!customerId) {
         let { data: newCust, error: custErr } = await supabase.from('customers').insert({
           customer_name: saleNewCustName.trim(),
           phone: saleNewCustPhone.trim(),
@@ -332,31 +360,20 @@ function App() {
         }
         if (custErr) throw custErr;
         customerId = newCust.customer_id;
-      } catch (err) {
-        alert('Failed to create customer: ' + err.message);
-        return;
+        showToast('New customer registered & sale recorded!');
       }
-    } else {
-      customerId = parseInt(selectedCustomerId);
-      if (!customerId) { alert("Please select a customer."); return; }
-    }
 
-    if (!selectedMedId || quantity < 1) return;
+      const med = medicines.find(m => m.medicine_id === parseInt(selectedMedId));
+      const price = med ? med.price : 0;
+      const totalAmount = parseInt(quantity) * price;
 
-    setIsSubmitting(true);
-    const med = medicines.find(m => m.medicine_id === parseInt(selectedMedId));
-    const price = med ? med.price : 0;
-    const totalAmount = parseInt(quantity) * price;
-
-    try {
       let { data: saleData, error: saleError } = await supabase.from('sales').insert({
         customer_id: customerId,
-        employee_id: employeeId,
-        total_amount: totalAmount
+        employee_id: employeeId
       }).select('sale_id').single();
 
       if (saleError && saleError.code === '42P01') {
-        const res = await supabase.from('Sales').insert({ customer_id: customerId, employee_id: employeeId, total_amount: totalAmount }).select('sale_id').single();
+        const res = await supabase.from('Sales').insert({ customer_id: customerId, employee_id: employeeId }).select('sale_id').single();
         saleData = res.data; saleError = res.error;
       }
       if (saleError) throw saleError;
@@ -365,18 +382,17 @@ function App() {
         sale_id: saleData.sale_id,
         medicine_id: parseInt(selectedMedId),
         quantity: parseInt(quantity),
-        subtotal: totalAmount
+        unit_price_at_sale: price
       });
       if (itemError && itemError.code === '42P01') {
-        const res = await supabase.from('Sales_Items').insert({ sale_id: saleData.sale_id, medicine_id: parseInt(selectedMedId), quantity: parseInt(quantity), subtotal: totalAmount });
+        const res = await supabase.from('Sales_Items').insert({ sale_id: saleData.sale_id, medicine_id: parseInt(selectedMedId), quantity: parseInt(quantity), unit_price_at_sale: price });
         itemError = res.error;
       }
       if (itemError) throw itemError;
 
       showToast('Sale recorded successfully!');
-      setSelectedMedId(''); setQuantity(1); setSelectedCustomerId('');
+      setSelectedMedId(''); setQuantity(1);
       setSaleNewCustName(''); setSaleNewCustPhone(''); setSaleNewCustEmail('');
-      setSaleCustomerMode('existing');
       fetchData();
     } catch (err) {
       alert('Failed to record sale: ' + (err.message || 'Unknown error'));
@@ -405,20 +421,92 @@ function App() {
 
   const handleAddEmployee = async (e) => {
     e.preventDefault();
+    if (!newEmployeeEmail.trim() || !newEmployeePassword.trim()) {
+      alert('Email and password are required for employee login.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      let { error } = await supabase.from('employees').insert({ employee_name: newEmployeeName, role: newEmployeeRole, salary: parseInt(newEmployeeSalary) });
+      const password_hash = btoa(newEmployeePassword);
+      let { error } = await supabase.from('employees').insert({ 
+        employee_name: newEmployeeName, 
+        role: newEmployeeRole, 
+        salary: parseInt(newEmployeeSalary),
+        email: newEmployeeEmail.trim(),
+        password_hash: password_hash
+      });
       if (error && error.code === '42P01') {
-        const res = await supabase.from('Employees').insert({ employee_name: newEmployeeName, role: newEmployeeRole, salary: parseInt(newEmployeeSalary) });
+        const res = await supabase.from('Employees').insert({ 
+          employee_name: newEmployeeName, role: newEmployeeRole, salary: parseInt(newEmployeeSalary),
+          email: newEmployeeEmail.trim(), password_hash: password_hash
+        });
         error = res.error;
       }
       if (error) throw error;
-      showToast('Employee added successfully!');
+      showToast('Employee registered successfully!');
       setNewEmployeeName(''); setNewEmployeeRole(''); setNewEmployeeSalary('');
+      setNewEmployeeEmail(''); setNewEmployeePassword('');
       fetchData();
     } catch (err) {
       alert('Error: ' + err.message);
     } finally { setIsSubmitting(false); }
+  };
+
+  const handleDeleteEmployee = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this employee?")) return;
+    try {
+      let { error: empErr } = await supabase.from('employees').delete().eq('employee_id', id);
+      if (empErr && empErr.code === '42P01') {
+        const res = await supabase.from('Employees').delete().eq('employee_id', id);
+        empErr = res.error;
+      }
+      if (empErr) throw empErr;
+      showToast('Employee deleted successfully.');
+      fetchData();
+    } catch (err) {
+      alert('Error deleting employee: ' + err.message);
+    }
+  };
+
+  const fetchMySales = async () => {
+    const employeeId = currentUser?.employee_id;
+    if (!employeeId) return;
+    try {
+      setLoading(true);
+      setActiveTab('my_sales');
+      
+      let { data, error } = await supabase
+        .from('sales')
+        .select(`
+          sale_id, sale_date, total_amount,
+          customers (customer_name, phone, email),
+          sales_items ( quantity, subtotal, medicines (medicine_name) )
+        `)
+        .eq('employee_id', employeeId)
+        .order('sale_date', { ascending: false });
+
+      if (error && error.code === '42P01') {
+        const res = await supabase
+          .from('Sales')
+          .select(`
+            sale_id, sale_date, total_amount,
+            Customers (customer_name, phone, email),
+            Sales_Items ( quantity, subtotal, Medicines (medicine_name) )
+          `)
+          .eq('employee_id', employeeId)
+          .order('sale_date', { ascending: false });
+        data = res.data;
+        error = res.error;
+      }
+
+      if (error) throw error;
+      setMySales(data || []);
+    } catch (err) {
+      console.error('Error fetching my sales:', err);
+      showToast('Failed to load sales history');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAddMedicine = async (e) => {
@@ -471,18 +559,24 @@ function App() {
       }
       if (error) throw error;
       
-      // Update the auto-created stock's expiry date
-      if (newMedExpiryDate && medData) {
-        let { error: stockUpdateErr } = await supabase.from('stock').update({ expiry_date: newMedExpiryDate }).eq('medicine_id', medData.medicine_id);
+      const initialQty = parseInt(newMedQty) || 0;
+
+      // Update the auto-created stock's quantity and expiry date
+      let stockUpdates = {};
+      if (initialQty > 0) stockUpdates.quantity = initialQty;
+      if (newMedExpiryDate) stockUpdates.expiry_date = newMedExpiryDate;
+
+      if (Object.keys(stockUpdates).length > 0 && medData) {
+        let { error: stockUpdateErr } = await supabase.from('stock').update(stockUpdates).eq('medicine_id', medData.medicine_id);
         if (stockUpdateErr && stockUpdateErr.code === '42P01') {
-           const res = await supabase.from('Stock').update({ expiry_date: newMedExpiryDate }).eq('medicine_id', medData.medicine_id);
+           const res = await supabase.from('Stock').update(stockUpdates).eq('medicine_id', medData.medicine_id);
            stockUpdateErr = res.error;
         }
         if (stockUpdateErr) throw stockUpdateErr;
       }
 
       showToast('Medicine added successfully!');
-      setNewMedName(''); setNewMedCategory(''); setNewMedPrice(''); setNewMedSupplierName(''); setNewMedExpiryDate('');
+      setNewMedName(''); setNewMedCategory(''); setNewMedPrice(''); setNewMedSupplierName(''); setNewMedExpiryDate(''); setNewMedQty('');
       fetchData();
     } catch (err) {
       alert('Error: ' + err.message);
@@ -490,15 +584,28 @@ function App() {
   };
 
   const handleDeleteMedicine = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this medicine? Its stock will also be deleted.")) return;
+    if (!window.confirm("Are you sure you want to delete this medicine? Its stock, sales history, and expiry alerts will also be deleted.")) return;
     try {
-      // Must delete stock first due to foreign key constraint
+      // 1. Delete related expiry alerts (no FK constraint, so must clean manually)
+      let { error: alertErr } = await supabase.from('expiry_alerts').delete().eq('medicine_id', id);
+      if (alertErr && alertErr.code === '42P01') {
+        await supabase.from('Expiry_Alerts').delete().eq('medicine_id', id);
+      }
+
+      // 2. Delete related sales_items (FK to medicines)
+      let { error: siErr } = await supabase.from('sales_items').delete().eq('medicine_id', id);
+      if (siErr && siErr.code === '42P01') {
+        await supabase.from('Sales_Items').delete().eq('medicine_id', id);
+      }
+
+      // 3. Delete stock (FK to medicines)
       let { error: stockErr } = await supabase.from('stock').delete().eq('medicine_id', id);
       if (stockErr && stockErr.code === '42P01') {
         const res = await supabase.from('Stock').delete().eq('medicine_id', id);
         stockErr = res.error;
       }
       
+      // 4. Finally delete the medicine itself
       let { error: medErr } = await supabase.from('medicines').delete().eq('medicine_id', id);
       if (medErr && medErr.code === '42P01') {
         const res = await supabase.from('Medicines').delete().eq('medicine_id', id);
@@ -532,6 +639,7 @@ function App() {
         error = res.error;
       }
       if (error) throw error;
+
       showToast(`Added ${qty} units to stock successfully!`);
       setRestockMedId(''); setRestockQty('');
       fetchData();
@@ -559,9 +667,30 @@ function App() {
         </div>
       )}
 
+      <div className="stat-grid">
+        <div className="stat-card">
+          <div className="stat-value">{medicines.length}</div>
+          <div className="stat-label">Total Medicines</div>
+          <Pill className="stat-icon" />
+        </div>
+        <div className="stat-card danger">
+          <div className="stat-value">{medicines.filter(m => (parseInt(m.stock_quantity) || 0) < 20).length}</div>
+          <div className="stat-label">Low Stock Items</div>
+          <AlertTriangle className="stat-icon" />
+        </div>
+        <div className="stat-card info">
+          <div className="stat-value">{new Set(medicines.filter(m => m.supplier_name).map(m => m.supplier_name)).size}</div>
+          <div className="stat-label">Active Suppliers</div>
+          <Truck className="stat-icon" />
+        </div>
+      </div>
+
       <div className="grid">
         <section className="card">
-          <h2><Pill className="icon" /> Inventory Overview</h2>
+          <h2>
+            <Pill className="icon" /> Inventory Overview
+            <span className="concept-badge" title="DBMS View combining Medicines, Stock, and Suppliers">💡 View: vw_medicine_stock_details</span>
+          </h2>
           {loading ? <p>Loading...</p> : (
             <div style={{ overflowX: 'auto' }}>
               <table>
@@ -588,27 +717,22 @@ function App() {
         </section>
 
         <section className="card">
-          <h2><ShoppingCart className="icon" /> Record Sale</h2>
+          <h2>
+            <ShoppingCart className="icon" /> Record Sale
+            <span className="concept-badge" title="DBMS Stored Procedure inserting into Sales and Sales_Items">💡 Exec: create_sale()</span>
+          </h2>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Selling as: <strong style={{ color: 'var(--primary)' }}>{currentUser?.name}</strong></p>
           <form onSubmit={handleSale}>
             <div className="form-group">
-              <label><Users size={16} style={{display:'inline', verticalAlign:'text-bottom'}}/> Customer</label>
-              <div style={{ display: 'flex', gap: '2px', marginBottom: '0.75rem', background: '#161B26', padding: '3px', borderRadius: '8px' }}>
-                <button type="button" onClick={() => setSaleCustomerMode('existing')} style={{ flex: 1, padding: '0.4rem', borderRadius: '6px', border: 'none', background: saleCustomerMode === 'existing' ? '#0d9488' : 'transparent', color: saleCustomerMode === 'existing' ? '#fff' : '#64748B', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>Existing</button>
-                <button type="button" onClick={() => setSaleCustomerMode('new')} style={{ flex: 1, padding: '0.4rem', borderRadius: '6px', border: 'none', background: saleCustomerMode === 'new' ? '#0d9488' : 'transparent', color: saleCustomerMode === 'new' ? '#fff' : '#64748B', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>New Customer</button>
+              <label><Users size={16} style={{display:'inline', verticalAlign:'text-bottom'}}/> Customer Details</label>
+              <p style={{ fontSize: '0.75rem', color: '#64748B', marginBottom: '0.5rem', marginTop: '0.25rem' }}>
+                Enter customer info. Existing customers are auto-detected by phone or email.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <input type="text" className="form-control" placeholder="Customer Name *" value={saleNewCustName} onChange={e => setSaleNewCustName(e.target.value)} required />
+                <input type="text" className="form-control" placeholder="Phone Number" value={saleNewCustPhone} onChange={e => setSaleNewCustPhone(e.target.value)} />
+                <input type="email" className="form-control" placeholder="Email Address" value={saleNewCustEmail} onChange={e => setSaleNewCustEmail(e.target.value)} />
               </div>
-              {saleCustomerMode === 'existing' ? (
-                <select className="form-control" value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} required>
-                  <option value="" disabled>Select customer...</option>
-                  {customers.map(c => <option key={c.customer_id} value={c.customer_id}>{c.customer_name} {c.email ? `(${c.email})` : ''}</option>)}
-                </select>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <input type="text" className="form-control" placeholder="Customer Name *" value={saleNewCustName} onChange={e => setSaleNewCustName(e.target.value)} required />
-                  <input type="text" className="form-control" placeholder="Phone Number" value={saleNewCustPhone} onChange={e => setSaleNewCustPhone(e.target.value)} />
-                  <input type="email" className="form-control" placeholder="Email Address" value={saleNewCustEmail} onChange={e => setSaleNewCustEmail(e.target.value)} />
-                </div>
-              )}
             </div>
             <div className="form-group">
               <label>Medicine</label>
@@ -623,7 +747,7 @@ function App() {
               <label>Quantity</label>
               <input type="number" className="form-control" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} required />
             </div>
-            <button type="submit" className="btn" disabled={isSubmitting || !selectedMedId || (saleCustomerMode === 'existing' && !selectedCustomerId) || (saleCustomerMode === 'new' && !saleNewCustName.trim())}>
+            <button type="submit" className="btn" disabled={isSubmitting || !selectedMedId || !saleNewCustName.trim()}>
               {isSubmitting ? 'Processing...' : <><Activity size={20} /> Execute Sale</>}
             </button>
           </form>
@@ -686,14 +810,20 @@ function App() {
         {loading ? <p>Loading...</p> : (
           <div style={{ overflowX: 'auto' }}>
             <table>
-              <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Salary (₹)</th></tr></thead>
+              <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Email</th><th>Salary (₹)</th><th>Actions</th></tr></thead>
               <tbody>
                 {employees.map(e => (
                   <tr key={e.employee_id}>
                     <td>{e.employee_id}</td>
                     <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{e.employee_name}</td>
                     <td><span className="badge" style={{background:'rgba(13,148,136,0.08)', color:'#5EEAD4', border:'1px solid rgba(13,148,136,0.2)'}}>{e.role}</span></td>
+                    <td style={{ fontSize: '0.85rem', color: '#94A3B8' }}>{e.email || 'N/A'}</td>
                     <td>{e.salary}</td>
+                    <td>
+                      <button className="btn-icon" onClick={() => handleDeleteEmployee(e.employee_id)} style={{ color: '#EF4444', padding: '0.25rem', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete Employee">
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -702,7 +832,8 @@ function App() {
         )}
       </section>
       <section className="card">
-        <h2><PlusCircle className="icon" /> Add Employee</h2>
+        <h2><PlusCircle className="icon" /> Register Employee</h2>
+        <p style={{ fontSize: '0.75rem', color: '#64748B', marginBottom: '1rem' }}>Create login credentials so the employee can sign in.</p>
         <form onSubmit={handleAddEmployee}>
           <div className="form-group">
             <label>Full Name</label>
@@ -716,8 +847,79 @@ function App() {
             <label>Salary (₹)</label>
             <input type="number" className="form-control" value={newEmployeeSalary} onChange={e=>setNewEmployeeSalary(e.target.value)} required />
           </div>
-          <button type="submit" className="btn" disabled={isSubmitting}>Add Employee</button>
+          <div className="form-group">
+            <label>Login Email</label>
+            <input type="email" className="form-control" placeholder="employee@example.com" value={newEmployeeEmail} onChange={e=>setNewEmployeeEmail(e.target.value)} required />
+          </div>
+          <div className="form-group">
+            <label>Login Password</label>
+            <input type="password" className="form-control" placeholder="Set a password" value={newEmployeePassword} onChange={e=>setNewEmployeePassword(e.target.value)} required />
+          </div>
+          <button type="submit" className="btn" disabled={isSubmitting || !newEmployeeEmail.trim() || !newEmployeePassword.trim()}>Register Employee</button>
         </form>
+      </section>
+    </div>
+  );
+
+  const renderMySales = () => (
+    <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+      <section className="card">
+        <h2>
+          <ClipboardList className="icon" /> My Sales History
+          <span className="concept-badge" title="DBMS View aggregating Sales and Customer Data">💡 View: vw_sales_report</span>
+        </h2>
+        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+          All sales made by <strong style={{ color: 'var(--primary)' }}>{currentUser?.name}</strong>
+        </p>
+        {loading ? <p>Loading...</p> : mySales.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)' }}>No sales recorded yet.</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Sale ID</th>
+                  <th>Date & Time</th>
+                  <th>Customer</th>
+                  <th>Items Sold</th>
+                  <th>Total (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mySales.map(sale => {
+                  const items = sale.sales_items || sale.Sales_Items || [];
+                  const custData = sale.customers || sale.Customers;
+                  const custObj = Array.isArray(custData) ? custData[0] : custData;
+                  return (
+                    <tr key={sale.sale_id}>
+                      <td>#{sale.sale_id}</td>
+                      <td style={{ fontSize: '0.85rem' }}>
+                        {new Date(sale.sale_date).toLocaleDateString()} <span style={{ color: '#64748B' }}>{new Date(sale.sale_date).toLocaleTimeString()}</span>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 500, color: '#F1F5F9' }}>{custObj?.customer_name || 'Unknown'}</div>
+                        {custObj?.phone && <div style={{ fontSize: '0.75rem', color: '#64748B' }}>{custObj.phone}</div>}
+                      </td>
+                      <td>
+                        <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.85rem' }}>
+                          {items.map((item, idx) => {
+                            const med = item.medicines || item.Medicines || {};
+                            return (
+                              <li key={idx} style={{ marginBottom: '0.2rem' }}>
+                                <strong style={{ color: '#F1F5F9' }}>{item.quantity}x</strong> {med.medicine_name || 'Unknown'} <span style={{ color: '#64748B', fontSize: '0.8rem' }}>(₹{item.subtotal})</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </td>
+                      <td style={{ fontWeight: 600, color: '#F1F5F9' }}>₹{sale.total_amount}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );
@@ -772,7 +974,10 @@ function App() {
           )}
         </section>
       <section className="card">
-        <h2><PlusCircle className="icon" /> Add Medicine</h2>
+        <h2>
+          <PlusCircle className="icon" /> Add Medicine
+          <span className="concept-badge" title="DBMS Trigger creating stock row automatically">💡 Triggers: auto_create_stock()</span>
+        </h2>
         <form onSubmit={handleAddMedicine}>
           <div className="form-group">
             <label>Medicine Name</label>
@@ -787,6 +992,10 @@ function App() {
             <input type="number" step="0.01" className="form-control" value={newMedPrice} onChange={e=>setNewMedPrice(e.target.value)} required />
           </div>
           <div className="form-group">
+            <label>Initial Quantity</label>
+            <input type="number" className="form-control" placeholder="Optional" value={newMedQty} onChange={e=>setNewMedQty(e.target.value)} />
+          </div>
+          <div className="form-group">
             <label>Supplier Name</label>
             <input type="text" className="form-control" placeholder="Enter supplier name" value={newMedSupplierName} onChange={e=>setNewMedSupplierName(e.target.value)} required />
           </div>
@@ -798,7 +1007,10 @@ function App() {
         </form>
       </section>
       <section className="card" style={{ gridColumn: '1 / -1', marginTop: '1.25rem' }}>
-        <h2><PlusCircle className="icon" /> Restock Medicine</h2>
+        <h2>
+          <PlusCircle className="icon" /> Restock Medicine
+          <span className="concept-badge" title="DBMS Trigger checking expiry constraints">💡 Triggers: check_expiry_alert()</span>
+        </h2>
         <form onSubmit={handleRestock} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
             <label>Medicine</label>
@@ -881,6 +1093,70 @@ function App() {
       </section>
     </div>
   );
+
+  const renderSuppliers = () => {
+    // Group medicines by supplier
+    const supplierMap = {};
+    medicines.forEach(med => {
+      const suppName = med.supplier_name || 'Unknown Supplier';
+      if (!supplierMap[suppName]) {
+        supplierMap[suppName] = { name: suppName, items: [], totalStockValue: 0 };
+      }
+      supplierMap[suppName].items.push(med);
+      supplierMap[suppName].totalStockValue += (med.price * med.stock_quantity);
+    });
+    
+    const supplierList = Object.values(supplierMap);
+
+    return (
+      <div className="grid" style={{ gridTemplateColumns: '1fr' }}>
+        <section className="card">
+          <h2><Truck className="icon" /> Supplier Portfolio</h2>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+            Current medicines and stock value provided by each supplier.
+          </p>
+          {loading ? <p>Loading...</p> : supplierList.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)' }}>No suppliers found.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {supplierList.map((supp, idx) => (
+                <div key={idx} style={{ background: 'var(--bg-lighter)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <h3 style={{ margin: 0, color: '#F1F5F9', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Truck size={18} color="#0d9488" /> {supp.name}
+                    </h3>
+                    <span className="badge" style={{ background: 'rgba(13, 148, 136, 0.1)', color: '#5EEAD4' }}>
+                      Total Value: ₹{supp.totalStockValue.toFixed(2)}
+                    </span>
+                  </div>
+                  <table style={{ margin: 0, background: 'transparent' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)' }}>Medicine</th>
+                        <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)' }}>Category</th>
+                        <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)' }}>Unit Price (₹)</th>
+                        <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)' }}>Current Stock</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supp.items.map(item => (
+                        <tr key={item.medicine_id}>
+                          <td style={{ fontWeight: 500, borderBottom: 'none' }}>{item.medicine_name}</td>
+                          <td style={{ borderBottom: 'none' }}>{item.category}</td>
+                          <td style={{ borderBottom: 'none' }}>₹{item.price}</td>
+                          <td style={{ borderBottom: 'none' }}>{item.stock_quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  };
 
   const renderReceiptModal = () => {
     if (!selectedReceipt) return null;
@@ -981,6 +1257,9 @@ function App() {
         <button className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
           <LayoutDashboard size={18} /> Dashboard
         </button>
+        <button className={`nav-tab ${activeTab === 'my_sales' ? 'active' : ''}`} onClick={() => fetchMySales()}>
+          <ClipboardList size={18} /> My Sales
+        </button>
         <button className={`nav-tab ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => setActiveTab('customers')}>
           <Users size={18} /> Customers
         </button>
@@ -992,12 +1271,19 @@ function App() {
         <button className={`nav-tab ${activeTab === 'medicines' ? 'active' : ''}`} onClick={() => setActiveTab('medicines')}>
           <Pill size={18} /> Medicines
         </button>
+        {currentUser?.role === 'Manager' && (
+          <button className={`nav-tab ${activeTab === 'suppliers' ? 'active' : ''}`} onClick={() => setActiveTab('suppliers')}>
+            <Truck size={18} /> Suppliers
+          </button>
+        )}
       </nav>
 
       {activeTab === 'dashboard' && renderDashboard()}
+      {activeTab === 'my_sales' && renderMySales()}
       {activeTab === 'customers' && renderCustomers()}
       {activeTab === 'employees' && currentUser?.role === 'Manager' && renderEmployees()}
       {activeTab === 'medicines' && renderMedicines()}
+      {activeTab === 'suppliers' && currentUser?.role === 'Manager' && renderSuppliers()}
       {activeTab === 'customer_history' && renderCustomerHistory()}
 
       {renderReceiptModal()}
