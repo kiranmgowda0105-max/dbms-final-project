@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
-import { Pill, User, Mail, ChevronRight, Lock, Shield, CheckSquare, Square } from 'lucide-react';
+import { Pill, User, Mail, ChevronRight, Lock, Shield, BadgeCheck, CheckSquare, Square, Briefcase } from 'lucide-react';
 
 const MANAGER_USERS = [
   {email: 'admin', pass: '123', name: 'Priya', role: 'Manager'}
 ];
 
 const Login = ({ onLoginSuccess }) => {
-  const [loginMode, setLoginMode] = useState('customer'); // 'customer' or 'manager'
+  const [loginMode, setLoginMode] = useState('employee'); // 'employee' or 'manager'
   const [isSignUp, setIsSignUp] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [empRole, setEmpRole] = useState('Cashier');
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,84 +29,82 @@ const Login = ({ onLoginSuccess }) => {
         if (!email || !password) throw new Error("Email and password required.");
         const user = MANAGER_USERS.find(u => u.email === email && u.pass === password);
         if (user) {
-          await onLoginSuccess({ ...user, rememberMe });
+          // Try to find the manager's employee record
+          let { data: empRecord } = await supabase
+            .from('employees')
+            .select('employee_id')
+            .eq('employee_name', user.name)
+            .maybeSingle();
+          await onLoginSuccess({ ...user, employee_id: empRecord?.employee_id || null, rememberMe });
         } else {
           throw new Error('Invalid manager credentials.');
         }
       } else {
-        // Customer Auth
+        // Employee Auth
         if (!email || !password) throw new Error("Email and password required.");
         
         if (isSignUp) {
           if (!name) throw new Error("Full Name is required for Sign Up.");
           
-          // Check if exists
-          let { data: existingCust, error: checkErr } = await supabase
-            .from('customers')
-            .select('*')
+          // Check if employee with this email already exists
+          let { data: existingEmp } = await supabase
+            .from('employees')
+            .select('employee_id')
             .eq('email', email)
-            .single();
+            .maybeSingle();
             
-          if (checkErr && checkErr.code === '42P01') {
-            const res = await supabase.from('Customers').select('*').eq('email', email).single();
-            existingCust = res.data;
-          }
-          
-          if (existingCust) {
+          if (existingEmp) {
             throw new Error("Email already registered. Please Sign In.");
           }
           
-          // Hash password (basic hash for demo purposes, normally backend handles this securely)
-          const password_hash = btoa(password); // Very basic base64 just to populate the column
+          const password_hash = btoa(password);
           
-          let { data: newCust, error: insertErr } = await supabase.from('customers').insert({
-            customer_name: name,
+          let { data: newEmp, error: insertErr } = await supabase.from('employees').insert({
+            employee_name: name,
+            role: empRole || 'Cashier',
+            salary: 0,
             email: email,
-            phone: '',
             password_hash: password_hash
           }).select().single();
           
-          if (insertErr && insertErr.code === '42P01') {
-            const res = await supabase.from('Customers').insert({ 
-              customer_name: name, email: email, phone: '', password_hash: password_hash 
-            }).select().single();
-            newCust = res.data;
-            insertErr = res.error;
-          }
-          
           if (insertErr) {
-            if (insertErr.code === '42703' && insertErr.message.includes('password_hash')) {
-              throw new Error("SYSTEM ERROR: Please run the SQL command in pgAdmin to add the password_hash column!");
+            if (insertErr.message && insertErr.message.includes('password_hash')) {
+              throw new Error("Database needs updating. Please ask your manager to run the ALTER TABLE SQL to add email and password_hash columns to the employees table.");
             }
             throw insertErr;
           }
           
-          await onLoginSuccess({ name: newCust.customer_name, email: newCust.email, role: 'Customer', customer_id: newCust.customer_id, rememberMe });
+          await onLoginSuccess({ 
+            name: newEmp.employee_name, 
+            email: newEmp.email, 
+            role: 'Employee', 
+            employee_id: newEmp.employee_id, 
+            rememberMe 
+          });
           
         } else {
           // Sign In
-          let { data: cust, error: checkErr } = await supabase
-            .from('customers')
+          let { data: emp, error: checkErr } = await supabase
+            .from('employees')
             .select('*')
             .eq('email', email)
-            .single();
-            
-          if (checkErr && checkErr.code === '42P01') {
-            const res = await supabase.from('Customers').select('*').eq('email', email).single();
-            cust = res.data;
-            checkErr = res.error;
+            .maybeSingle();
+          
+          if (!emp) {
+            throw new Error("Account not found. Please Sign Up first.");
           }
           
-          if (!cust) {
-            throw new Error("Account not found. Please Sign Up.");
+          if (emp.password_hash !== btoa(password)) {
+            throw new Error("Invalid email or password.");
           }
           
-          // Verify password
-          if (cust.password_hash !== btoa(password)) {
-             throw new Error("Invalid email or password.");
-          }
-          
-          await onLoginSuccess({ name: cust.customer_name, email: cust.email, role: 'Customer', customer_id: cust.customer_id, rememberMe });
+          await onLoginSuccess({ 
+            name: emp.employee_name, 
+            email: emp.email, 
+            role: 'Employee', 
+            employee_id: emp.employee_id, 
+            rememberMe 
+          });
         }
       }
     } catch (err) {
@@ -123,16 +122,16 @@ const Login = ({ onLoginSuccess }) => {
             <Pill size={36} className="login-logo" />
           </div>
           <h2>Nexus Pharmacy</h2>
-          <p>Please enter your details to {loginMode === 'customer' && isSignUp ? 'create an account' : 'sign in'}.</p>
+          <p>Please enter your details to {loginMode === 'employee' && isSignUp ? 'create an account' : 'sign in'}.</p>
         </div>
 
         <div style={{ display: 'flex', gap: '2px', marginBottom: '1.5rem', background: '#161B26', padding: '3px', borderRadius: '8px' }}>
           <button 
             type="button" 
-            onClick={() => { setLoginMode('customer'); setError(null); }}
-            style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: loginMode === 'customer' ? 'none' : '1px solid rgba(255,255,255,0.07)', background: loginMode === 'customer' ? '#0d9488' : 'transparent', color: loginMode === 'customer' ? '#fff' : '#64748B', cursor: 'pointer', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontWeight: 500, fontSize: '0.86rem' }}
+            onClick={() => { setLoginMode('employee'); setError(null); }}
+            style={{ flex: 1, padding: '0.5rem', borderRadius: '6px', border: loginMode === 'employee' ? 'none' : '1px solid rgba(255,255,255,0.07)', background: loginMode === 'employee' ? '#0d9488' : 'transparent', color: loginMode === 'employee' ? '#fff' : '#64748B', cursor: 'pointer', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontWeight: 500, fontSize: '0.86rem' }}
           >
-            <User size={16} /> Customer
+            <BadgeCheck size={16} /> Employee
           </button>
           <button 
             type="button" 
@@ -146,21 +145,37 @@ const Login = ({ onLoginSuccess }) => {
         {error && <div className="login-error">{error}</div>}
 
         <form className="login-form" onSubmit={handleAuth}>
-          {loginMode === 'customer' && isSignUp && (
-            <div className="form-group">
-              <label>Full Name</label>
-              <div className="input-with-icon">
-                <User size={18} className="input-icon" />
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="John Doe"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required={isSignUp}
-                />
+          {loginMode === 'employee' && isSignUp && (
+            <>
+              <div className="form-group">
+                <label>Full Name</label>
+                <div className="input-with-icon">
+                  <User size={18} className="input-icon" />
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
               </div>
-            </div>
+              <div className="form-group">
+                <label>Role / Position</label>
+                <div className="input-with-icon">
+                  <Briefcase size={18} className="input-icon" />
+                  <input 
+                    type="text" 
+                    className="form-control" 
+                    placeholder="e.g. Cashier, Pharmacist"
+                    value={empRole}
+                    onChange={(e) => setEmpRole(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+            </>
           )}
 
           <div className="form-group">
@@ -206,12 +221,12 @@ const Login = ({ onLoginSuccess }) => {
 
           <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginBottom: '1rem' }}>
             {loading ? 'Processing...' : (
-              <>{loginMode === 'customer' && isSignUp ? 'Create Account' : 'Sign In'} <ChevronRight size={18} /></>
+              <>{loginMode === 'employee' && isSignUp ? 'Create Account' : 'Sign In'} <ChevronRight size={18} /></>
             )}
           </button>
         </form>
 
-        {loginMode === 'customer' && (
+        {loginMode === 'employee' && (
           <div style={{ textAlign: 'center', fontSize: '0.86rem', color: '#64748B' }}>
             {isSignUp ? "Already have an account? " : "Don't have an account? "}
             <button onClick={() => { setIsSignUp(!isSignUp); setError(null); }} className="btn-text" style={{ color: '#14b8a6' }}>

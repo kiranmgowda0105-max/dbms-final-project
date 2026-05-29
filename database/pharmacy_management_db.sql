@@ -44,6 +44,7 @@ CREATE TABLE Medicines (
     CONSTRAINT fk_supplier
     FOREIGN KEY (supplier_id)
     REFERENCES Suppliers(supplier_id)
+    ON DELETE CASCADE
 );
 
 -- ==========================================
@@ -59,6 +60,7 @@ CREATE TABLE Stock (
     CONSTRAINT fk_medicine
     FOREIGN KEY (medicine_id)
     REFERENCES Medicines(medicine_id)
+    ON DELETE CASCADE
 );
 
 -- ==========================================
@@ -95,11 +97,13 @@ CREATE TABLE Sales (
 
     CONSTRAINT fk_customer
     FOREIGN KEY (customer_id)
-    REFERENCES Customers(customer_id),
+    REFERENCES Customers(customer_id)
+    ON DELETE CASCADE,
 
     CONSTRAINT fk_employee
     FOREIGN KEY (employee_id)
     REFERENCES Employees(employee_id)
+    ON DELETE CASCADE
 );
 
 -- ==========================================
@@ -115,11 +119,13 @@ CREATE TABLE Sales_Items (
 
     CONSTRAINT fk_sale
     FOREIGN KEY (sale_id)
-    REFERENCES Sales(sale_id),
+    REFERENCES Sales(sale_id)
+    ON DELETE CASCADE,
 
     CONSTRAINT fk_sale_medicine
     FOREIGN KEY (medicine_id)
     REFERENCES Medicines(medicine_id)
+    ON DELETE CASCADE
 );
 
 -- ==========================================

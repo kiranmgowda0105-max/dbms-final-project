@@ -22,10 +22,20 @@ function App() {
   
   // Sale Form State
   const [selectedMedId, setSelectedMedId] = useState('');
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+
+  // Sale Customer Selection
+  const [saleCustomerMode, setSaleCustomerMode] = useState('existing');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [saleNewCustName, setSaleNewCustName] = useState('');
+  const [saleNewCustPhone, setSaleNewCustPhone] = useState('');
+  const [saleNewCustEmail, setSaleNewCustEmail] = useState('');
+
+  // Restock State
+  const [restockMedId, setRestockMedId] = useState('');
+  const [restockQty, setRestockQty] = useState('');
 
   // New Customer State
   const [newCustomerName, setNewCustomerName] = useState('');
@@ -200,19 +210,138 @@ function App() {
     setCurrentUser(null);
   };
 
+  const handleDeduplicate = async () => {
+    if (!window.confirm("Are you sure you want to clean up duplicate records in the database? This will keep only one unique copy of each supplier, employee, customer, and medicine, and clean up their stock records.")) return;
+    
+    setLoading(true);
+    try {
+      const safeFetch = async (tableName) => {
+        let { data, error } = await supabase.from(tableName.toLowerCase()).select('*');
+        if (error && error.code === '42P01') {
+          const res = await supabase.from(tableName).select('*');
+          data = res.data;
+        }
+        return data;
+      };
+
+      const safeDelete = async (tableName, idCol, idValue) => {
+        let { error } = await supabase.from(tableName.toLowerCase()).delete().eq(idCol, idValue);
+        if (error && error.code === '42P01') {
+          await supabase.from(tableName).delete().eq(idCol, idValue);
+        }
+      };
+
+      let suppliersDeleted = 0;
+      let employeesDeleted = 0;
+      let customersDeleted = 0;
+      let medicinesDeleted = 0;
+
+      // 1. Deduplicate Suppliers
+      const suppliers = await safeFetch('Suppliers');
+      if (suppliers) {
+        const seenSuppliers = new Set();
+        for (const supp of suppliers) {
+          const key = supp.supplier_name.trim().toLowerCase();
+          if (seenSuppliers.has(key)) {
+            await safeDelete('Suppliers', 'supplier_id', supp.supplier_id);
+            suppliersDeleted++;
+          } else {
+            seenSuppliers.add(key);
+          }
+        }
+      }
+
+      // 2. Deduplicate Employees
+      const employees = await safeFetch('Employees');
+      if (employees) {
+        const seenEmployees = new Set();
+        for (const emp of employees) {
+          const key = `${emp.employee_name.trim().toLowerCase()}-${emp.role.trim().toLowerCase()}`;
+          if (seenEmployees.has(key)) {
+            await safeDelete('Employees', 'employee_id', emp.employee_id);
+            employeesDeleted++;
+          } else {
+            seenEmployees.add(key);
+          }
+        }
+      }
+
+      // 3. Deduplicate Customers
+      const customersList = await safeFetch('Customers');
+      if (customersList) {
+        const seenCustomers = new Set();
+        for (const cust of customersList) {
+          const key = cust.customer_name.trim().toLowerCase();
+          if (seenCustomers.has(key)) {
+            await safeDelete('Customers', 'customer_id', cust.customer_id);
+            customersDeleted++;
+          } else {
+            seenCustomers.add(key);
+          }
+        }
+      }
+
+      // 4. Deduplicate Medicines
+      const medicinesList = await safeFetch('Medicines');
+      if (medicinesList) {
+        const seenMedicines = new Set();
+        for (const med of medicinesList) {
+          const key = med.medicine_name.trim().toLowerCase();
+          if (seenMedicines.has(key)) {
+            await safeDelete('Medicines', 'medicine_id', med.medicine_id);
+            medicinesDeleted++;
+          } else {
+            seenMedicines.add(key);
+          }
+        }
+      }
+
+      showToast(`Cleaned duplicates: ${medicinesDeleted} medicines, ${customersDeleted} customers, ${employeesDeleted} employees, ${suppliersDeleted} suppliers.`);
+      fetchData();
+    } catch (err) {
+      alert("Error cleaning duplicates: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // --- Handlers ---
   const handleSale = async (e) => {
     e.preventDefault();
     
-    // Auto-detect customer ID based on logged in user
-    const currentCustomer = customers.find(c => c.email === currentUser?.email);
-    if (!currentCustomer) {
-      alert("Error: Logged-in customer record not found in database.");
+    // Auto-detect employee ID from logged-in user
+    const employeeId = currentUser?.employee_id;
+    if (!employeeId) {
+      alert("Error: Employee ID not found. Please log in again.");
       return;
     }
-    const autoCustomerId = currentCustomer.customer_id;
 
-    if (!selectedMedId || !selectedEmployeeId || quantity < 1) return;
+    // Resolve customer ID
+    let customerId;
+    if (saleCustomerMode === 'new') {
+      if (!saleNewCustName.trim()) { alert("Customer name is required."); return; }
+      try {
+        let { data: newCust, error: custErr } = await supabase.from('customers').insert({
+          customer_name: saleNewCustName.trim(),
+          phone: saleNewCustPhone.trim(),
+          email: saleNewCustEmail.trim()
+        }).select().single();
+        if (custErr && custErr.code === '42P01') {
+          const res = await supabase.from('Customers').insert({ customer_name: saleNewCustName.trim(), phone: saleNewCustPhone.trim(), email: saleNewCustEmail.trim() }).select().single();
+          newCust = res.data; custErr = res.error;
+        }
+        if (custErr) throw custErr;
+        customerId = newCust.customer_id;
+      } catch (err) {
+        alert('Failed to create customer: ' + err.message);
+        return;
+      }
+    } else {
+      customerId = parseInt(selectedCustomerId);
+      if (!customerId) { alert("Please select a customer."); return; }
+    }
+
+    if (!selectedMedId || quantity < 1) return;
 
     setIsSubmitting(true);
     const med = medicines.find(m => m.medicine_id === parseInt(selectedMedId));
@@ -221,13 +350,13 @@ function App() {
 
     try {
       let { data: saleData, error: saleError } = await supabase.from('sales').insert({
-        customer_id: parseInt(autoCustomerId),
-        employee_id: parseInt(selectedEmployeeId),
+        customer_id: customerId,
+        employee_id: employeeId,
         total_amount: totalAmount
       }).select('sale_id').single();
 
       if (saleError && saleError.code === '42P01') {
-        const res = await supabase.from('Sales').insert({ customer_id: parseInt(autoCustomerId), employee_id: parseInt(selectedEmployeeId), total_amount: totalAmount }).select('sale_id').single();
+        const res = await supabase.from('Sales').insert({ customer_id: customerId, employee_id: employeeId, total_amount: totalAmount }).select('sale_id').single();
         saleData = res.data; saleError = res.error;
       }
       if (saleError) throw saleError;
@@ -245,7 +374,9 @@ function App() {
       if (itemError) throw itemError;
 
       showToast('Sale recorded successfully!');
-      setSelectedMedId(''); setQuantity(1);
+      setSelectedMedId(''); setQuantity(1); setSelectedCustomerId('');
+      setSaleNewCustName(''); setSaleNewCustPhone(''); setSaleNewCustEmail('');
+      setSaleCustomerMode('existing');
       fetchData();
     } catch (err) {
       alert('Failed to record sale: ' + (err.message || 'Unknown error'));
@@ -382,6 +513,33 @@ function App() {
     }
   };
 
+  const handleRestock = async (e) => {
+    e.preventDefault();
+    const medId = parseInt(restockMedId);
+    const qty = parseInt(restockQty);
+    if (!medId || !qty || qty < 1) return;
+    setIsSubmitting(true);
+    try {
+      let { data: stockData } = await supabase.from('stock').select('quantity').eq('medicine_id', medId).single();
+      if (!stockData) {
+        const res = await supabase.from('Stock').select('quantity').eq('medicine_id', medId).single();
+        stockData = res.data;
+      }
+      const currentQty = stockData ? stockData.quantity : 0;
+      let { error } = await supabase.from('stock').update({ quantity: currentQty + qty }).eq('medicine_id', medId);
+      if (error && error.code === '42P01') {
+        const res = await supabase.from('Stock').update({ quantity: currentQty + qty }).eq('medicine_id', medId);
+        error = res.error;
+      }
+      if (error) throw error;
+      showToast(`Added ${qty} units to stock successfully!`);
+      setRestockMedId(''); setRestockQty('');
+      fetchData();
+    } catch (err) {
+      alert('Error restocking: ' + err.message);
+    } finally { setIsSubmitting(false); }
+  };
+
   // --- Render Sections ---
 
   const renderDashboard = () => (
@@ -431,13 +589,26 @@ function App() {
 
         <section className="card">
           <h2><ShoppingCart className="icon" /> Record Sale</h2>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Selling as: <strong style={{ color: 'var(--primary)' }}>{currentUser?.name}</strong></p>
           <form onSubmit={handleSale}>
             <div className="form-group">
-              <label><BadgeCheck size={16} style={{display:'inline', verticalAlign:'text-bottom'}}/> Employee</label>
-              <select className="form-control" value={selectedEmployeeId} onChange={e => setSelectedEmployeeId(e.target.value)} required>
-                <option value="" disabled>Select...</option>
-                {employees.map(e => <option key={e.employee_id} value={e.employee_id}>{e.employee_name}</option>)}
-              </select>
+              <label><Users size={16} style={{display:'inline', verticalAlign:'text-bottom'}}/> Customer</label>
+              <div style={{ display: 'flex', gap: '2px', marginBottom: '0.75rem', background: '#161B26', padding: '3px', borderRadius: '8px' }}>
+                <button type="button" onClick={() => setSaleCustomerMode('existing')} style={{ flex: 1, padding: '0.4rem', borderRadius: '6px', border: 'none', background: saleCustomerMode === 'existing' ? '#0d9488' : 'transparent', color: saleCustomerMode === 'existing' ? '#fff' : '#64748B', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>Existing</button>
+                <button type="button" onClick={() => setSaleCustomerMode('new')} style={{ flex: 1, padding: '0.4rem', borderRadius: '6px', border: 'none', background: saleCustomerMode === 'new' ? '#0d9488' : 'transparent', color: saleCustomerMode === 'new' ? '#fff' : '#64748B', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 500 }}>New Customer</button>
+              </div>
+              {saleCustomerMode === 'existing' ? (
+                <select className="form-control" value={selectedCustomerId} onChange={e => setSelectedCustomerId(e.target.value)} required>
+                  <option value="" disabled>Select customer...</option>
+                  {customers.map(c => <option key={c.customer_id} value={c.customer_id}>{c.customer_name} {c.email ? `(${c.email})` : ''}</option>)}
+                </select>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <input type="text" className="form-control" placeholder="Customer Name *" value={saleNewCustName} onChange={e => setSaleNewCustName(e.target.value)} required />
+                  <input type="text" className="form-control" placeholder="Phone Number" value={saleNewCustPhone} onChange={e => setSaleNewCustPhone(e.target.value)} />
+                  <input type="email" className="form-control" placeholder="Email Address" value={saleNewCustEmail} onChange={e => setSaleNewCustEmail(e.target.value)} />
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label>Medicine</label>
@@ -452,7 +623,7 @@ function App() {
               <label>Quantity</label>
               <input type="number" className="form-control" min="1" value={quantity} onChange={e => setQuantity(e.target.value)} required />
             </div>
-            <button type="submit" className="btn" disabled={isSubmitting || !selectedMedId || !selectedEmployeeId}>
+            <button type="submit" className="btn" disabled={isSubmitting || !selectedMedId || (saleCustomerMode === 'existing' && !selectedCustomerId) || (saleCustomerMode === 'new' && !saleNewCustName.trim())}>
               {isSubmitting ? 'Processing...' : <><Activity size={20} /> Execute Sale</>}
             </button>
           </form>
@@ -626,6 +797,27 @@ function App() {
           <button type="submit" className="btn" disabled={isSubmitting || !newMedSupplierName.trim() || !newMedExpiryDate}>Add Medicine</button>
         </form>
       </section>
+      <section className="card" style={{ gridColumn: '1 / -1', marginTop: '1.25rem' }}>
+        <h2><PlusCircle className="icon" /> Restock Medicine</h2>
+        <form onSubmit={handleRestock} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+            <label>Medicine</label>
+            <select className="form-control" value={restockMedId} onChange={e => setRestockMedId(e.target.value)} required>
+              <option value="" disabled>Select medicine to restock...</option>
+              {medicines.map(med => (
+                <option key={med.medicine_id} value={med.medicine_id}>{med.medicine_name} (Current: {med.stock_quantity})</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+            <label>Quantity to Add</label>
+            <input type="number" className="form-control" min="1" placeholder="e.g. 50" value={restockQty} onChange={e => setRestockQty(e.target.value)} required />
+          </div>
+          <button type="submit" className="btn" style={{ flex: '0 0 auto', width: 'auto', padding: '0.65rem 1.5rem' }} disabled={isSubmitting || !restockMedId || !restockQty}>
+            {isSubmitting ? 'Updating...' : 'Restock'}
+          </button>
+        </form>
+      </section>
       </div>
     </>
   );
@@ -771,6 +963,11 @@ function App() {
           <p>Advanced Real-Time Inventory & Management System</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {currentUser?.role === 'Manager' && (
+            <button className="btn-logout" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#FCA5A5', border: '1px solid rgba(239, 68, 68, 0.2)' }} onClick={handleDeduplicate}>
+              Clean Duplicates
+            </button>
+          )}
           <span style={{ color: '#64748B', fontSize: '0.82rem' }}>
             Logged in as <strong style={{ color: '#F1F5F9' }}>{currentUser?.name}</strong> <span style={{opacity: 0.5}}>({currentUser?.role})</span>
           </span>
