@@ -1540,7 +1540,7 @@ function App() {
           <button className="modal-close no-print" onClick={() => setSelectedReceipt(null)}><X size={24} /></button>
           
           <div className="receipt-header">
-            <h2>Nexus Pharmacy</h2>
+            <h2>Pharmacy Management System</h2>
             <p>123 Health Avenue, Med City</p>
             <p>Tel: +91 98765 43210</p>
             <div className="receipt-divider"></div>
@@ -1609,8 +1609,8 @@ function App() {
             <Activity size={20} />
           </div>
           <div>
-            <h2 style={{ fontSize: '1.25rem', margin: 0, color: '#FFFFFF', fontWeight: 700 }}>Nexus</h2>
-            <p style={{ fontSize: '0.75rem', margin: 0, color: 'rgba(255, 255, 255, 0.7)' }}>Pharmacy System</p>
+            <h2 style={{ fontSize: '1.25rem', margin: 0, color: '#FFFFFF', fontWeight: 700 }}>Pharmacy</h2>
+            <p style={{ fontSize: '0.75rem', margin: 0, color: 'rgba(255, 255, 255, 0.7)' }}>Management System</p>
           </div>
         </div>
 

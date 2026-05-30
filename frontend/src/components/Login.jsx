@@ -87,7 +87,7 @@ const Login = ({ onLoginSuccess }) => {
           <div className="login-logo-wrapper">
             <Pill size={36} className="login-logo" />
           </div>
-          <h2>Nexus Pharmacy</h2>
+          <h2>Pharmacy Management System</h2>
           <p>Please enter your credentials to sign in.</p>
         </div>
 
