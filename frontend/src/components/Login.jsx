@@ -27,11 +27,16 @@ const Login = ({ onLoginSuccess }) => {
         const user = MANAGER_USERS.find(u => u.email === email && u.pass === password);
         if (user) {
           // Try to find the manager's employee record
-          let { data: empRecord } = await supabase
+          let { data: empRecord, error: empErr } = await supabase
             .from('employees')
             .select('employee_id')
             .eq('employee_name', user.name)
             .maybeSingle();
+
+          if (empErr) {
+            const res = await supabase.from('Employees').select('employee_id').eq('employee_name', user.name).maybeSingle();
+            empRecord = res.data;
+          }
           await onLoginSuccess({ ...user, employee_id: empRecord?.employee_id || null, rememberMe });
         } else {
           throw new Error('Invalid manager credentials.');
@@ -45,12 +50,18 @@ const Login = ({ onLoginSuccess }) => {
           .select('*')
           .eq('email', email)
           .maybeSingle();
+          
+        if (checkErr) {
+          const res = await supabase.from('Employees').select('*').eq('email', email).maybeSingle();
+          emp = res.data;
+        }
         
         if (!emp) {
           throw new Error("Account not found. Please contact your manager to register you.");
         }
         
-        if (emp.password_hash !== btoa(password)) {
+        const isPasswordCorrect = emp.password_hash === password || emp.password_hash === btoa(password);
+        if (!isPasswordCorrect) {
           throw new Error("Invalid email or password.");
         }
         

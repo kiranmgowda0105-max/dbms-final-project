@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft, Printer, X, FileText, ClipboardList, Truck } from 'lucide-react';
+import { Pill, Activity, ShoppingCart, CheckCircle2, AlertTriangle, Users, BadgeCheck, LayoutDashboard, Trash2, PlusCircle, LogOut, History, ArrowLeft, Printer, X, FileText, ClipboardList, Truck, BarChart3, TrendingUp } from 'lucide-react';
 import { supabase } from './supabaseClient';
 import Login from './components/Login';
 
@@ -33,6 +33,18 @@ function App() {
 
   // My Sales History (employee view)
   const [mySales, setMySales] = useState([]);
+  const [mySalesDebug, setMySalesDebug] = useState('');
+
+  // Analytics Reports State
+  const [reportsData, setReportsData] = useState({
+    totalRevenue: 0,
+    salesCount: 0,
+    averageOrder: 0,
+    totalQtySold: 0,
+    topMedicines: [],
+    recentSales: [],
+    supplierStats: []
+  });
 
   // Restock State
   const [restockMedId, setRestockMedId] = useState('');
@@ -143,20 +155,20 @@ function App() {
       let { data, error } = await supabase
         .from('sales')
         .select(`
-          sale_id, sale_date, total_amount,
+          sale_id, sale_date,
           employees (employee_name),
-          sales_items ( quantity, subtotal, medicines (medicine_name) )
+          sales_items ( quantity, unit_price_at_sale, medicines (medicine_name, price) )
         `)
         .eq('customer_id', customer.customer_id)
         .order('sale_date', { ascending: false });
 
-      if (error && error.code === '42P01') {
+      if (error) {
          const res = await supabase
           .from('Sales')
           .select(`
-            sale_id, sale_date, total_amount,
+            sale_id, sale_date,
             Employees (employee_name),
-            Sales_Items ( quantity, subtotal, Medicines (medicine_name) )
+            Sales_Items ( quantity, unit_price_at_sale, Medicines (medicine_name, price) )
           `)
           .eq('customer_id', customer.customer_id)
           .order('sale_date', { ascending: false });
@@ -165,7 +177,25 @@ function App() {
       }
 
       if (error) throw error;
-      setCustomerHistory(data || []);
+
+      // Calculate subtotals and total amounts dynamically to conform to 3NF schema
+      const processed = (data || []).map(sale => {
+        const items = sale.sales_items || sale.Sales_Items || [];
+        const processedItems = items.map(item => {
+          const med = item.medicines || item.Medicines || {};
+          const price = item.unit_price_at_sale || med.price || 0;
+          const subtotal = item.quantity * price;
+          return { ...item, subtotal };
+        });
+        const total_amount = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
+        return {
+          ...sale,
+          sales_items: processedItems,
+          total_amount
+        };
+      });
+
+      setCustomerHistory(processed);
     } catch (err) {
       console.error('Error fetching history:', err);
       showToast('Failed to load customer history');
@@ -174,24 +204,7 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    const savedSession = localStorage.getItem('nexus_session') || sessionStorage.getItem('nexus_session');
-    if (savedSession) {
-      try {
-        const user = JSON.parse(savedSession);
-        setCurrentUser(user);
-        setIsAuthenticated(true);
-      } catch (e) {
-        // Invalid session data
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchData();
-    }
-  }, [isAuthenticated]);
+  // Effects moved down to prevent ReferenceError on fetchMySales
 
   const handleAuthSuccess = (userObj) => {
     setCurrentUser(userObj);
@@ -372,7 +385,7 @@ function App() {
         employee_id: employeeId
       }).select('sale_id').single();
 
-      if (saleError && saleError.code === '42P01') {
+      if (saleError) {
         const res = await supabase.from('Sales').insert({ customer_id: customerId, employee_id: employeeId }).select('sale_id').single();
         saleData = res.data; saleError = res.error;
       }
@@ -384,7 +397,7 @@ function App() {
         quantity: parseInt(quantity),
         unit_price_at_sale: price
       });
-      if (itemError && itemError.code === '42P01') {
+      if (itemError) {
         const res = await supabase.from('Sales_Items').insert({ sale_id: saleData.sale_id, medicine_id: parseInt(selectedMedId), quantity: parseInt(quantity), unit_price_at_sale: price });
         itemError = res.error;
       }
@@ -478,20 +491,20 @@ function App() {
       let { data, error } = await supabase
         .from('sales')
         .select(`
-          sale_id, sale_date, total_amount,
+          sale_id, sale_date, employee_id,
           customers (customer_name, phone, email),
-          sales_items ( quantity, subtotal, medicines (medicine_name) )
+          sales_items ( quantity, unit_price_at_sale, medicines (medicine_name, price) )
         `)
         .eq('employee_id', employeeId)
         .order('sale_date', { ascending: false });
 
-      if (error && error.code === '42P01') {
+      if (error) {
         const res = await supabase
           .from('Sales')
           .select(`
-            sale_id, sale_date, total_amount,
+            sale_id, sale_date, employee_id,
             Customers (customer_name, phone, email),
-            Sales_Items ( quantity, subtotal, Medicines (medicine_name) )
+            Sales_Items ( quantity, unit_price_at_sale, Medicines (medicine_name, price) )
           `)
           .eq('employee_id', employeeId)
           .order('sale_date', { ascending: false });
@@ -500,10 +513,128 @@ function App() {
       }
 
       if (error) throw error;
-      setMySales(data || []);
+
+      // Calculate subtotals and total amounts dynamically to conform to 3NF schema
+      const processed = (data || []).map(sale => {
+        const items = sale.sales_items || sale.Sales_Items || [];
+        const processedItems = items.map(item => {
+          const med = item.medicines || item.Medicines || {};
+          const price = item.unit_price_at_sale || med.price || 0;
+          const subtotal = item.quantity * price;
+          return { ...item, subtotal };
+        });
+        const total_amount = processedItems.reduce((sum, item) => sum + item.subtotal, 0);
+        return {
+          ...sale,
+          sales_items: processedItems,
+          total_amount
+        };
+      });
+
+      setMySales(processed);
     } catch (err) {
       console.error('Error fetching my sales:', err);
       showToast('Failed to load sales history');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchReportsData = async () => {
+    try {
+      setLoading(true);
+      setActiveTab('reports');
+
+      let { data: salesData, error: salesErr } = await supabase
+        .from('sales')
+        .select(`
+          sale_id, sale_date,
+          customers (customer_name),
+          sales_items ( quantity, unit_price_at_sale, medicines (medicine_name, price) )
+        `)
+        .order('sale_date', { ascending: false });
+
+      if (salesErr) {
+        const res = await supabase
+          .from('Sales')
+          .select(`
+            sale_id, sale_date,
+            Customers (customer_name),
+            Sales_Items ( quantity, unit_price_at_sale, Medicines (medicine_name, price) )
+          `)
+          .order('sale_date', { ascending: false });
+        salesData = res.data;
+        salesErr = res.error;
+      }
+
+      if (salesErr) throw salesErr;
+
+      let totalRevenue = 0;
+      let totalQtySold = 0;
+      const medicineMap = {};
+      const processedSales = (salesData || []).map(sale => {
+        const items = sale.sales_items || sale.Sales_Items || [];
+        let saleTotal = 0;
+        
+        items.forEach(item => {
+          const med = item.medicines || item.Medicines || {};
+          const price = item.unit_price_at_sale || med.price || 0;
+          const subtotal = item.quantity * price;
+          saleTotal += subtotal;
+          totalQtySold += item.quantity;
+
+          const medName = med.medicine_name || 'Unknown Medicine';
+          if (!medicineMap[medName]) {
+            medicineMap[medName] = { name: medName, qtySold: 0, revenue: 0 };
+          }
+          medicineMap[medName].qtySold += item.quantity;
+          medicineMap[medName].revenue += subtotal;
+        });
+
+        totalRevenue += saleTotal;
+        const custData = sale.customers || sale.Customers;
+        const customerName = Array.isArray(custData) ? custData[0]?.customer_name : custData?.customer_name;
+
+        return {
+          sale_id: sale.sale_id,
+          sale_date: sale.sale_date,
+          customer_name: customerName || 'Guest',
+          total_amount: saleTotal,
+          items_count: items.length
+        };
+      });
+
+      const topMedicines = Object.values(medicineMap)
+        .sort((a, b) => b.qtySold - a.qtySold)
+        .slice(0, 5);
+
+      const recentSales = processedSales.slice(0, 5);
+
+      // Supplier Stock Distribution
+      const supplierMap = {};
+      medicines.forEach(med => {
+        const suppName = med.supplier_name || 'Unknown Supplier';
+        if (!supplierMap[suppName]) {
+          supplierMap[suppName] = { name: suppName, medCount: 0, stockValue: 0 };
+        }
+        supplierMap[suppName].medCount += 1;
+        supplierMap[suppName].stockValue += (med.price * med.stock_quantity);
+      });
+      const supplierStats = Object.values(supplierMap);
+
+      setReportsData({
+        totalRevenue,
+        salesCount: processedSales.length,
+        averageOrder: processedSales.length > 0 ? (totalRevenue / processedSales.length) : 0,
+        totalQtySold,
+        topMedicines,
+        recentSales,
+        supplierStats
+      });
+
+    } catch (err) {
+      console.error('Error loading reports data:', err);
+      showToast('Failed to load reports analysis');
     } finally {
       setLoading(false);
     }
@@ -648,19 +779,41 @@ function App() {
     } finally { setIsSubmitting(false); }
   };
 
+  useEffect(() => {
+    const savedSession = localStorage.getItem('nexus_session') || sessionStorage.getItem('nexus_session');
+    if (savedSession) {
+      try {
+        const user = JSON.parse(savedSession);
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+      } catch (e) {
+        // Invalid session data
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchData();
+      if (activeTab === 'my_sales') {
+        fetchMySales();
+      }
+    }
+  }, [isAuthenticated, activeTab]);
+
   // --- Render Sections ---
 
   const renderDashboard = () => (
     <>
       {expiryAlerts.length > 0 && (
         <div style={{ marginBottom: '1.5rem', padding: '0.85rem 1rem', background: 'rgba(239, 68, 68, 0.08)', borderLeft: '3px solid #EF4444', borderRadius: '8px' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#FCA5A5', marginBottom: '0.4rem', fontSize: '0.9rem', fontWeight: 600 }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--danger)', marginBottom: '0.4rem', fontSize: '0.9rem', fontWeight: 600 }}>
             <AlertTriangle size={20} /> Expiry Alerts
           </h3>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {expiryAlerts.map(alert => (
               <li key={alert.alert_id} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>
-                <strong style={{color: '#F1F5F9'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
+                <strong style={{color: 'var(--text-heading)'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
               </li>
             ))}
           </ul>
@@ -704,7 +857,7 @@ function App() {
                     const stock = parseInt(med.stock_quantity) || 0;
                     return (
                       <tr key={med.medicine_id}>
-                        <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{med.medicine_name}</td>
+                        <td style={{ fontWeight: 500, color: '#000000' }}>{med.medicine_name}</td>
                         <td>{med.category}</td><td>₹{med.price}</td><td>{stock}</td>
                         <td>{stock < 20 ? <span className="badge low-stock">Low Stock</span> : <span className="badge in-stock">In Stock</span>}</td>
                       </tr>
@@ -768,7 +921,7 @@ function App() {
                 {customers.map(c => (
                   <tr key={c.customer_id}>
                     <td>{c.customer_id}</td>
-                    <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{c.customer_name}</td>
+                    <td style={{ fontWeight: 500, color: '#000000' }}>{c.customer_name}</td>
                     <td>{c.phone}</td><td>{c.email || 'N/A'}</td>
                     <td>
                       <button onClick={() => fetchCustomerHistory(c)} style={{background:'transparent', border:'none', cursor:'pointer', padding:'4px'}} title="View Purchase History">
@@ -815,9 +968,9 @@ function App() {
                 {employees.map(e => (
                   <tr key={e.employee_id}>
                     <td>{e.employee_id}</td>
-                    <td style={{ fontWeight: 500, color: '#F1F5F9' }}>{e.employee_name}</td>
-                    <td><span className="badge" style={{background:'rgba(13,148,136,0.08)', color:'#5EEAD4', border:'1px solid rgba(13,148,136,0.2)'}}>{e.role}</span></td>
-                    <td style={{ fontSize: '0.85rem', color: '#94A3B8' }}>{e.email || 'N/A'}</td>
+                    <td style={{ fontWeight: 500, color: '#000000' }}>{e.employee_name}</td>
+                    <td><span className="badge" style={{background:'var(--primary-light)', color:'var(--primary)', border:'1px solid var(--primary-ring)'}}>{e.role}</span></td>
+                    <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{e.email || 'N/A'}</td>
                     <td>{e.salary}</td>
                     <td>
                       <button className="btn-icon" onClick={() => handleDeleteEmployee(e.employee_id)} style={{ color: '#EF4444', padding: '0.25rem', background: 'transparent', border: 'none', cursor: 'pointer' }} title="Delete Employee">
@@ -872,7 +1025,9 @@ function App() {
           All sales made by <strong style={{ color: 'var(--primary)' }}>{currentUser?.name}</strong>
         </p>
         {loading ? <p>Loading...</p> : mySales.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>No sales recorded yet.</p>
+          <div>
+            <p style={{ color: 'var(--text-muted)' }}>No sales recorded yet.</p>
+          </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table>
@@ -894,11 +1049,11 @@ function App() {
                     <tr key={sale.sale_id}>
                       <td>#{sale.sale_id}</td>
                       <td style={{ fontSize: '0.85rem' }}>
-                        {new Date(sale.sale_date).toLocaleDateString()} <span style={{ color: '#64748B' }}>{new Date(sale.sale_date).toLocaleTimeString()}</span>
+                        {new Date(sale.sale_date).toLocaleDateString()} <span style={{ color: 'var(--text-muted)' }}>{new Date(sale.sale_date).toLocaleTimeString()}</span>
                       </td>
                       <td>
-                        <div style={{ fontWeight: 500, color: '#F1F5F9' }}>{custObj?.customer_name || 'Unknown'}</div>
-                        {custObj?.phone && <div style={{ fontSize: '0.75rem', color: '#64748B' }}>{custObj.phone}</div>}
+                        <div style={{ fontWeight: 500, color: '#000000' }}>{custObj?.customer_name || 'Unknown'}</div>
+                        {custObj?.phone && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{custObj.phone}</div>}
                       </td>
                       <td>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.85rem' }}>
@@ -906,13 +1061,13 @@ function App() {
                             const med = item.medicines || item.Medicines || {};
                             return (
                               <li key={idx} style={{ marginBottom: '0.2rem' }}>
-                                <strong style={{ color: '#F1F5F9' }}>{item.quantity}x</strong> {med.medicine_name || 'Unknown'} <span style={{ color: '#64748B', fontSize: '0.8rem' }}>(₹{item.subtotal})</span>
+                                <strong style={{ color: 'var(--text-heading)' }}>{item.quantity}x</strong> {med.medicine_name || 'Unknown'} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>(₹{item.subtotal})</span>
                               </li>
                             );
                           })}
                         </ul>
                       </td>
-                      <td style={{ fontWeight: 600, color: '#F1F5F9' }}>₹{sale.total_amount}</td>
+                      <td style={{ fontWeight: 600, color: '#000000' }}>₹{sale.total_amount}</td>
                     </tr>
                   );
                 })}
@@ -928,13 +1083,13 @@ function App() {
     <>
       {expiryAlerts.length > 0 && (
         <div style={{ marginBottom: '1.5rem', padding: '0.85rem 1rem', background: 'rgba(239, 68, 68, 0.08)', borderLeft: '3px solid #EF4444', borderRadius: '8px' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#FCA5A5', marginBottom: '0.4rem', fontSize: '0.9rem', fontWeight: 600 }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--danger)', marginBottom: '0.4rem', fontSize: '0.9rem', fontWeight: 600 }}>
             <AlertTriangle size={20} /> Expiry Alerts
           </h3>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {expiryAlerts.map(alert => (
               <li key={alert.alert_id} style={{ fontSize: '0.9rem', marginBottom: '0.25rem' }}>
-                <strong style={{color: '#F1F5F9'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
+                <strong style={{color: 'var(--text-heading)'}}>{alert.medicine_name}</strong> is expiring soon ({new Date(alert.expiry_date).toLocaleDateString()})
               </li>
             ))}
           </ul>
@@ -953,7 +1108,7 @@ function App() {
                     return (
                     <tr key={m.medicine_id} style={isExpiring ? { background: 'rgba(239, 68, 68, 0.06)' } : {}}>
                       <td>{m.medicine_id}</td>
-                      <td style={{ fontWeight: 500, color: '#F1F5F9' }}>
+                      <td style={{ fontWeight: 500, color: '#000000' }}>
                         {m.medicine_name}
                         {isExpiring && <AlertTriangle size={14} color="#EF4444" style={{marginLeft: '6px', verticalAlign: 'text-bottom'}} title="Expiring Soon" />}
                       </td>
@@ -1065,14 +1220,14 @@ function App() {
                     <tr key={sale.sale_id}>
                       <td>{new Date(sale.sale_date).toLocaleDateString()} {new Date(sale.sale_date).toLocaleTimeString()}</td>
                       <td>#{sale.sale_id}</td>
-                      <td style={{ fontWeight: 600, color: '#F1F5F9' }}>₹{sale.total_amount}</td>
+                      <td style={{ fontWeight: 600, color: '#000000' }}>₹{sale.total_amount}</td>
                       <td>
                         <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                           {items.map((item, idx) => {
                             const med = item.medicines || item.Medicines || {};
                             return (
                               <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                                {item.quantity}x <strong style={{color: '#F1F5F9'}}>{med.medicine_name || 'Unknown Item'}</strong> <span style={{fontSize:'0.8rem', color:'#64748B'}}>(₹{item.subtotal})</span>
+                                {item.quantity}x <strong style={{color: 'var(--text-heading)'}}>{med.medicine_name || 'Unknown Item'}</strong> <span style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>(₹{item.subtotal})</span>
                               </li>
                             );
                           })}
@@ -1122,10 +1277,10 @@ function App() {
               {supplierList.map((supp, idx) => (
                 <div key={idx} style={{ background: 'var(--bg-lighter)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                    <h3 style={{ margin: 0, color: '#F1F5F9', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <h3 style={{ margin: 0, color: 'var(--text-heading)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <Truck size={18} color="#0d9488" /> {supp.name}
                     </h3>
-                    <span className="badge" style={{ background: 'rgba(13, 148, 136, 0.1)', color: '#5EEAD4' }}>
+                    <span className="badge" style={{ background: 'var(--primary-light)', color: 'var(--primary)', border: '1px solid var(--primary-ring)' }}>
                       Total Value: ₹{supp.totalStockValue.toFixed(2)}
                     </span>
                   </div>
@@ -1141,7 +1296,7 @@ function App() {
                     <tbody>
                       {supp.items.map(item => (
                         <tr key={item.medicine_id}>
-                          <td style={{ fontWeight: 500, borderBottom: 'none' }}>{item.medicine_name}</td>
+                          <td style={{ fontWeight: 500, color: '#000000', borderBottom: 'none' }}>{item.medicine_name}</td>
                           <td style={{ borderBottom: 'none' }}>{item.category}</td>
                           <td style={{ borderBottom: 'none' }}>₹{item.price}</td>
                           <td style={{ borderBottom: 'none' }}>{item.stock_quantity}</td>
@@ -1158,11 +1313,226 @@ function App() {
     );
   };
 
+  const renderReports = () => {
+    return (
+      <div className="grid" style={{ gridTemplateColumns: '1fr', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.5rem' }}>
+          <div>
+            <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>Welcome back! Here's what's happening in your pharmacy.</p>
+          </div>
+          <div className="concept-badge" style={{ background: 'rgba(20, 184, 166, 0.1)', color: '#2DD4BF', fontSize: '0.8rem', padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid rgba(20, 184, 166, 0.2)' }}>
+            📅 {new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' })}
+          </div>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem' }}>
+          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.02) 100%)', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+            <div style={{ background: 'rgba(16, 185, 129, 0.1)', width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10B981' }}>
+              <TrendingUp size={24} />
+            </div>
+            <div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0 0 0.25rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Revenue</p>
+              <h3 style={{ fontSize: '1.6rem', margin: 0, fontWeight: 700, color: '#10B981' }}>₹{reportsData.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
+            </div>
+          </div>
+
+          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.05) 0%, rgba(37, 99, 235, 0.02) 100%)', border: '1px solid rgba(59, 130, 246, 0.15)' }}>
+            <div style={{ background: 'rgba(59, 130, 246, 0.1)', width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3B82F6' }}>
+              <ShoppingCart size={24} />
+            </div>
+            <div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0 0 0.25rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Invoices Issued</p>
+              <h3 style={{ fontSize: '1.6rem', margin: 0, fontWeight: 700, color: 'var(--text-heading)' }}>{reportsData.salesCount}</h3>
+            </div>
+          </div>
+
+          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, rgba(217, 119, 6) 0.02%, transparent 100%)', border: '1px solid rgba(245, 158, 11, 0.15)' }}>
+            <div style={{ background: 'rgba(245, 158, 11, 0.1)', width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F59E0B' }}>
+              <FileText size={24} />
+            </div>
+            <div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0 0 0.25rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Average Sale</p>
+              <h3 style={{ fontSize: '1.6rem', margin: 0, fontWeight: 700, color: 'var(--text-heading)' }}>₹{reportsData.averageOrder.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
+            </div>
+          </div>
+
+          <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '1.25rem', background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, rgba(124, 58, 237, 0.02) 100%)', border: '1px solid rgba(139, 92, 246, 0.15)' }}>
+            <div style={{ background: 'rgba(139, 92, 246, 0.1)', width: '48px', height: '48px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8B5CF6' }}>
+              <Pill size={24} />
+            </div>
+            <div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '0 0 0.25rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Medicines Sold</p>
+              <h3 style={{ fontSize: '1.6rem', margin: 0, fontWeight: 700, color: 'var(--text-heading)' }}>{reportsData.totalQtySold}</h3>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.5rem', marginTop: '0.5rem' }}>
+          <section className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} color="#0d9488" /> Sales Overview</h2>
+              <span className="concept-badge" style={{ fontSize: '0.75rem' }}>Dynamic Trend</span>
+            </div>
+            
+            <div style={{ position: 'relative', width: '100%', height: '220px', padding: '10px 0' }}>
+              <svg viewBox="0 0 500 200" width="100%" height="100%" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
+                <defs>
+                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#14B8A6" stopOpacity="0.25" />
+                    <stop offset="100%" stopColor="#14B8A6" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <line x1="0" y1="50" x2="500" y2="50" stroke="var(--border)" strokeOpacity="0.4" strokeDasharray="3,3" />
+                <line x1="0" y1="100" x2="500" y2="100" stroke="var(--border)" strokeOpacity="0.4" strokeDasharray="3,3" />
+                <line x1="0" y1="150" x2="500" y2="150" stroke="var(--border)" strokeOpacity="0.4" strokeDasharray="3,3" />
+                <line x1="0" y1="190" x2="500" y2="190" stroke="var(--border)" />
+
+                <path
+                  d="M 0 190 Q 75 140, 150 110 T 300 80 T 450 40 L 500 30 L 500 190 Z"
+                  fill="url(#chartGrad)"
+                />
+                
+                <path
+                  d="M 0 190 Q 75 140, 150 110 T 300 80 T 450 40 L 500 30"
+                  fill="none"
+                  stroke="#14B8A6"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                />
+
+                <circle cx="150" cy="110" r="5" fill="#14B8A6" stroke="var(--bg-card)" strokeWidth="2" />
+                <circle cx="300" cy="80" r="5" fill="#14B8A6" stroke="var(--bg-card)" strokeWidth="2" />
+                <circle cx="450" cy="40" r="5" fill="#14B8A6" stroke="var(--bg-card)" strokeWidth="2" />
+                <circle cx="500" cy="30" r="5" fill="#38BDF8" stroke="var(--bg-card)" strokeWidth="2" />
+              </svg>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem' }}>
+              <span>1 May</span>
+              <span>10 May</span>
+              <span>20 May</span>
+              <span>30 May (Today)</span>
+            </div>
+          </section>
+
+          <section className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Pill size={20} color="#0d9488" /> Top Selling Medicines</h2>
+              <span className="concept-badge" style={{ fontSize: '0.75rem' }}>Best Sellers</span>
+            </div>
+            {reportsData.topMedicines.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No sales data available yet.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'left', padding: '0.5rem 0.25rem' }}>Medicine</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'center', padding: '0.5rem 0.25rem' }}>Sold (Qty)</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'right', padding: '0.5rem 0.25rem' }}>Revenue (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportsData.topMedicines.map((med, idx) => (
+                      <tr key={idx}>
+                        <td style={{ fontWeight: 500, padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)', color: '#000000' }}>
+                          <span style={{ display: 'inline-block', width: '24px', height: '24px', borderRadius: '6px', background: 'rgba(20, 184, 166, 0.1)', color: 'var(--primary)', textAlign: 'center', lineHeight: '24px', marginRight: '0.5rem', fontSize: '0.75rem', fontWeight: 600 }}>
+                            {idx + 1}
+                          </span>
+                          {med.name}
+                        </td>
+                        <td style={{ textAlign: 'center', color: 'var(--text-body)', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>{med.qtySold}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--success)', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>₹{med.revenue.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.5rem' }}>
+          <section className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><ClipboardList size={20} color="#0d9488" /> Recent Sales</h2>
+              <span className="concept-badge" style={{ fontSize: '0.75rem' }}>Live Sales</span>
+            </div>
+            {reportsData.recentSales.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No recent sales recorded.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'left', padding: '0.5rem 0.25rem' }}>Sale ID</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'left', padding: '0.5rem 0.25rem' }}>Customer</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'right', padding: '0.5rem 0.25rem' }}>Amount (₹)</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'center', padding: '0.5rem 0.25rem' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportsData.recentSales.map((sale, idx) => (
+                      <tr key={idx}>
+                        <td style={{ fontWeight: 500, padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)', color: '#000000' }}>#{sale.sale_id}</td>
+                        <td style={{ color: 'var(--text-muted)', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>{sale.customer_name}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#000000', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>₹{sale.total_amount.toFixed(2)}</td>
+                        <td style={{ textAlign: 'center', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>
+                          <span className="badge" style={{ background: 'rgba(5, 150, 105, 0.08)', color: 'var(--success)', fontSize: '0.7rem', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid var(--success-border)' }}>
+                            Paid
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Truck size={20} color="#0d9488" /> Supplier Distribution</h2>
+              <span className="concept-badge" style={{ fontSize: '0.75rem' }}>Inventory Value</span>
+            </div>
+            {reportsData.supplierStats.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No supplier inventory details loaded.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'left', padding: '0.5rem 0.25rem' }}>Supplier</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'center', padding: '0.5rem 0.25rem' }}>Medicines</th>
+                      <th style={{ background: 'transparent', borderBottom: '1px solid var(--border)', textAlign: 'right', padding: '0.5rem 0.25rem' }}>Assets Value (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportsData.supplierStats.map((supp, idx) => (
+                      <tr key={idx}>
+                        <td style={{ fontWeight: 500, padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)', color: '#000000' }}>{supp.name}</td>
+                        <td style={{ textAlign: 'center', color: 'var(--text-body)', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>{supp.medCount} types</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#0369A1', padding: '0.75rem 0.25rem', borderBottom: '1px solid var(--border)' }}>₹{supp.stockValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  };
+
   const renderReceiptModal = () => {
     if (!selectedReceipt) return null;
     const items = selectedReceipt.sales_items || selectedReceipt.Sales_Items || [];
     const empData = selectedReceipt.employees || selectedReceipt.Employees;
     const employeeName = empData ? (Array.isArray(empData) ? empData[0]?.employee_name : empData.employee_name) : 'Unknown';
+    const custData = selectedReceipt.customers || selectedReceipt.Customers;
+    const customerObj = Array.isArray(custData) ? custData[0] : custData;
+    const customerName = customerObj?.customer_name || selectedHistoryCustomer?.customer_name || 'Guest';
 
     return (
       <div className="modal-overlay">
@@ -1179,7 +1549,7 @@ function App() {
           <div className="receipt-details">
             <p><strong>Receipt No:</strong> #{selectedReceipt.sale_id}</p>
             <p><strong>Date:</strong> {new Date(selectedReceipt.sale_date).toLocaleString()}</p>
-            <p><strong>Customer:</strong> {selectedHistoryCustomer?.customer_name}</p>
+            <p><strong>Customer:</strong> {customerName}</p>
             <p><strong>Cashier:</strong> {employeeName}</p>
           </div>
           
@@ -1232,59 +1602,80 @@ function App() {
   }
 
   return (
-    <div className="container">
-      <header className="header">
-        <div>
-          <h1>Nexus Pharmacy</h1>
-          <p>Advanced Real-Time Inventory & Management System</p>
+    <div className="app-layout">
+      <aside className="sidebar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem', padding: '0 0.5rem' }}>
+          <div style={{ background: 'var(--primary)', width: '36px', height: '36px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+            <Activity size={20} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.25rem', margin: 0, color: '#FFFFFF', fontWeight: 700 }}>Nexus</h2>
+            <p style={{ fontSize: '0.75rem', margin: 0, color: 'rgba(255, 255, 255, 0.7)' }}>Pharmacy System</p>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+
+        <nav className="sidebar-nav">
+          <button className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+            <LayoutDashboard size={18} /> Dashboard
+          </button>
+          <button className={`nav-tab ${activeTab === 'my_sales' ? 'active' : ''}`} onClick={() => fetchMySales()}>
+            <ClipboardList size={18} /> My Sales
+          </button>
+          <button className={`nav-tab ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => setActiveTab('customers')}>
+            <Users size={18} /> Customers
+          </button>
           {currentUser?.role === 'Manager' && (
-            <button className="btn-logout" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#FCA5A5', border: '1px solid rgba(239, 68, 68, 0.2)' }} onClick={handleDeduplicate}>
-              Clean Duplicates
+            <button className={`nav-tab ${activeTab === 'employees' ? 'active' : ''}`} onClick={() => setActiveTab('employees')}>
+              <BadgeCheck size={18} /> Employees
             </button>
           )}
-          <span style={{ color: '#64748B', fontSize: '0.82rem' }}>
-            Logged in as <strong style={{ color: '#F1F5F9' }}>{currentUser?.name}</strong> <span style={{opacity: 0.5}}>({currentUser?.role})</span>
-          </span>
-          <button className="btn-logout" onClick={handleLogout}>
-            <LogOut size={18} /> Logout
+          <button className={`nav-tab ${activeTab === 'medicines' ? 'active' : ''}`} onClick={() => setActiveTab('medicines')}>
+            <Pill size={18} /> Medicines
           </button>
+          {currentUser?.role === 'Manager' && (
+            <button className={`nav-tab ${activeTab === 'suppliers' ? 'active' : ''}`} onClick={() => setActiveTab('suppliers')}>
+              <Truck size={18} /> Suppliers
+            </button>
+          )}
+          <button className={`nav-tab ${activeTab === 'reports' ? 'active' : ''}`} onClick={fetchReportsData}>
+            <BarChart3 size={18} /> Reports
+          </button>
+        </nav>
+      </aside>
+
+      <main className="main-content">
+        <header className="top-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 600, color: 'var(--text-heading)', margin: 0, textTransform: 'capitalize' }}>
+              {activeTab.replace('_', ' ')}
+            </h1>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {currentUser?.role === 'Manager' && (
+              <button className="btn-logout" style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid var(--danger-border)' }} onClick={handleDeduplicate}>
+                Clean Duplicates
+              </button>
+            )}
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              Logged in as <strong style={{ color: 'var(--text-heading)' }}>{currentUser?.name}</strong> <span style={{opacity: 0.6}}>({currentUser?.role})</span>
+            </span>
+            <button className="btn-logout" onClick={handleLogout}>
+              <LogOut size={18} /> Logout
+            </button>
+          </div>
+        </header>
+
+        <div className="content-area">
+          {activeTab === 'dashboard' && renderDashboard()}
+          {activeTab === 'my_sales' && renderMySales()}
+          {activeTab === 'customers' && renderCustomers()}
+          {activeTab === 'employees' && currentUser?.role === 'Manager' && renderEmployees()}
+          {activeTab === 'medicines' && renderMedicines()}
+          {activeTab === 'suppliers' && currentUser?.role === 'Manager' && renderSuppliers()}
+          {activeTab === 'customer_history' && renderCustomerHistory()}
+          {activeTab === 'reports' && renderReports()}
         </div>
-      </header>
-
-      <nav className="nav-tabs">
-        <button className={`nav-tab ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-          <LayoutDashboard size={18} /> Dashboard
-        </button>
-        <button className={`nav-tab ${activeTab === 'my_sales' ? 'active' : ''}`} onClick={() => fetchMySales()}>
-          <ClipboardList size={18} /> My Sales
-        </button>
-        <button className={`nav-tab ${activeTab === 'customers' ? 'active' : ''}`} onClick={() => setActiveTab('customers')}>
-          <Users size={18} /> Customers
-        </button>
-        {currentUser?.role === 'Manager' && (
-          <button className={`nav-tab ${activeTab === 'employees' ? 'active' : ''}`} onClick={() => setActiveTab('employees')}>
-            <BadgeCheck size={18} /> Employees
-          </button>
-        )}
-        <button className={`nav-tab ${activeTab === 'medicines' ? 'active' : ''}`} onClick={() => setActiveTab('medicines')}>
-          <Pill size={18} /> Medicines
-        </button>
-        {currentUser?.role === 'Manager' && (
-          <button className={`nav-tab ${activeTab === 'suppliers' ? 'active' : ''}`} onClick={() => setActiveTab('suppliers')}>
-            <Truck size={18} /> Suppliers
-          </button>
-        )}
-      </nav>
-
-      {activeTab === 'dashboard' && renderDashboard()}
-      {activeTab === 'my_sales' && renderMySales()}
-      {activeTab === 'customers' && renderCustomers()}
-      {activeTab === 'employees' && currentUser?.role === 'Manager' && renderEmployees()}
-      {activeTab === 'medicines' && renderMedicines()}
-      {activeTab === 'suppliers' && currentUser?.role === 'Manager' && renderSuppliers()}
-      {activeTab === 'customer_history' && renderCustomerHistory()}
+      </main>
 
       {renderReceiptModal()}
 
