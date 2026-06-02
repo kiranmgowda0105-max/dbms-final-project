@@ -277,6 +277,10 @@ BEGIN
         FROM Medicines
         WHERE medicine_id = NEW.medicine_id;
 
+        -- Delete any existing alerts for this medicine first to avoid duplicates
+        DELETE FROM Expiry_Alerts
+        WHERE medicine_id = NEW.medicine_id;
+
         INSERT INTO Expiry_Alerts(
             medicine_id,
             medicine_name,

@@ -129,7 +129,19 @@ function App() {
         const res = await supabase.from('Expiry_Alerts').select('*').order('created_at', { ascending: false });
         alertsData = res.data;
       }
-      setExpiryAlerts(alertsData || []);
+      
+      // Deduplicate alerts by medicine_id to avoid displaying duplicate alerts for the same medicine
+      const uniqueAlerts = [];
+      const seenMedIds = new Set();
+      if (alertsData) {
+        alertsData.forEach(alert => {
+          if (!seenMedIds.has(alert.medicine_id)) {
+            seenMedIds.add(alert.medicine_id);
+            uniqueAlerts.push(alert);
+          }
+        });
+      }
+      setExpiryAlerts(uniqueAlerts);
 
       // Suppliers
       let { data: suppData, error: suppError } = await supabase.from('suppliers').select('*');
@@ -313,7 +325,24 @@ function App() {
         }
       }
 
-      showToast(`Cleaned duplicates: ${medicinesDeleted} medicines, ${customersDeleted} customers, ${employeesDeleted} employees, ${suppliersDeleted} suppliers.`);
+      // 5. Deduplicate Expiry Alerts
+      let alertsDeleted = 0;
+      const alerts = await safeFetch('Expiry_Alerts');
+      if (alerts) {
+        // Sort alerts by created_at descending so we keep the most recent one
+        const sortedAlerts = [...alerts].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const seenAlertMedIds = new Set();
+        for (const alert of sortedAlerts) {
+          if (seenAlertMedIds.has(alert.medicine_id)) {
+            await safeDelete('Expiry_Alerts', 'alert_id', alert.alert_id);
+            alertsDeleted++;
+          } else {
+            seenAlertMedIds.add(alert.medicine_id);
+          }
+        }
+      }
+
+      showToast(`Cleaned duplicates: ${medicinesDeleted} medicines, ${customersDeleted} customers, ${employeesDeleted} employees, ${suppliersDeleted} suppliers, ${alertsDeleted} expiry alerts.`);
       fetchData();
     } catch (err) {
       alert("Error cleaning duplicates: " + err.message);
