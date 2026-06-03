@@ -61,7 +61,7 @@ CREATE TABLE Medicines (
     medicine_id SERIAL PRIMARY KEY,
     medicine_name VARCHAR(100) NOT NULL,
     category VARCHAR(50),
-    price NUMERIC(10,2),
+    price NUMERIC(10,2) CHECK (price >= 0),
     supplier_id INT,
 
     CONSTRAINT fk_supplier
@@ -79,8 +79,8 @@ CREATE TABLE Medicines (
 
 CREATE TABLE Stock (
     stock_id SERIAL PRIMARY KEY,
-    medicine_id INT UNIQUE,
-    quantity INT NOT NULL,
+    medicine_id INT UNIQUE NOT NULL,
+    quantity INT NOT NULL CHECK (quantity >= 0),
     expiry_date DATE NOT NULL,
 
     CONSTRAINT fk_stock_medicine
@@ -118,7 +118,7 @@ CREATE TABLE Employees (
     employee_id SERIAL PRIMARY KEY,
     employee_name VARCHAR(100),
     role VARCHAR(50),
-    salary NUMERIC(10,2),
+    salary NUMERIC(10,2) CHECK (salary >= 0),
     email VARCHAR(100) UNIQUE,
     password_hash VARCHAR(255)
 );
@@ -132,8 +132,8 @@ CREATE TABLE Employees (
 
 CREATE TABLE Sales (
     sale_id SERIAL PRIMARY KEY,
-    customer_id INT,
-    employee_id INT,
+    customer_id INT NOT NULL,
+    employee_id INT NOT NULL,
     sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_sale_customer
@@ -156,10 +156,10 @@ CREATE TABLE Sales (
 
 CREATE TABLE Sales_Items (
     sale_item_id SERIAL PRIMARY KEY,
-    sale_id INT,
-    medicine_id INT,
-    quantity INT,
-    unit_price_at_sale NUMERIC(10,2),
+    sale_id INT NOT NULL,
+    medicine_id INT NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    unit_price_at_sale NUMERIC(10,2) NOT NULL CHECK (unit_price_at_sale >= 0),
 
     CONSTRAINT fk_saleitem_sale
     FOREIGN KEY (sale_id)
@@ -169,7 +169,10 @@ CREATE TABLE Sales_Items (
     CONSTRAINT fk_saleitem_medicine
     FOREIGN KEY (medicine_id)
     REFERENCES Medicines(medicine_id)
-    ON DELETE CASCADE
+    ON DELETE CASCADE,
+
+    CONSTRAINT uq_sale_medicine 
+    UNIQUE (sale_id, medicine_id)
 );
 
 
@@ -293,6 +296,11 @@ BEGIN
             NEW.expiry_date,
             'Medicine expiring within 7 days'
         );
+
+    ELSE
+        -- If expiry date has been updated/extended, remove any existing alert
+        DELETE FROM Expiry_Alerts
+        WHERE medicine_id = NEW.medicine_id;
 
     END IF;
 
@@ -433,10 +441,10 @@ COMMIT;
 
 BEGIN;
 
-INSERT INTO Sales(customer_id, employee_id, total_amount)
-VALUES(2, 2, 500);
+INSERT INTO Sales(customer_id, employee_id)
+VALUES(2, 2);
 
--- Oops, wrong data! Roll back the transaction.
+-- Oops, wrong data or selected wrong employee! Roll back the transaction.
 ROLLBACK;
 
 
@@ -475,22 +483,24 @@ ON m.supplier_id = s.supplier_id;
 
 
 -- QUERY 6: INNER JOIN (three tables)
--- Full sale details with customer & employee names
+-- Full sale details with customer & employee names and computed total amount
 SELECT
     sa.sale_id,
     c.customer_name,
     e.employee_name,
-    sa.total_amount,
+    COALESCE(SUM(si.quantity * si.unit_price_at_sale), 0) AS total_amount,
     sa.sale_date
 FROM Sales sa
 JOIN Customers c ON sa.customer_id = c.customer_id
-JOIN Employees e ON sa.employee_id = e.employee_id;
+JOIN Employees e ON sa.employee_id = e.employee_id
+LEFT JOIN Sales_Items si ON sa.sale_id = si.sale_id
+GROUP BY sa.sale_id, c.customer_name, e.employee_name, sa.sale_date;
 
 
 -- QUERY 7: AGGREGATE FUNCTION (SUM)
--- Total revenue from all sales
-SELECT SUM(total_amount) AS total_revenue
-FROM Sales;
+-- Total revenue from all sales items
+SELECT SUM(quantity * unit_price_at_sale) AS total_revenue
+FROM Sales_Items;
 
 
 -- QUERY 8: AGGREGATE FUNCTION (COUNT)
