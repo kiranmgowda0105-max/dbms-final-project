@@ -408,9 +408,9 @@ If a query encounters an error or is cancelled due to input mistakes, the entire
 ```sql
 BEGIN;
 
--- Attempting an insert with an invalid field (e.g. total_amount does not exist in Sales)
-INSERT INTO Sales(customer_id, employee_id, total_amount)
-VALUES(2, 2, 500);
+-- Attempting an insert with an invalid customer / employee ID to trigger constraint failure
+INSERT INTO Sales(customer_id, employee_id)
+VALUES(9999, 9999);
 
 -- Error encountered: discard the active block to maintain integrity
 ROLLBACK;
@@ -441,8 +441,8 @@ JOIN Suppliers s ON m.supplier_id = s.supplier_id;
 ### 7.3. Aggregate Function (SUM) - Revenue
 Sums up the value of all transactions to calculate the total gross revenue.
 ```sql
-SELECT SUM(total_amount) AS total_revenue
-FROM Sales;
+SELECT SUM(quantity * unit_price_at_sale) AS total_revenue
+FROM Sales_Items;
 ```
 
 ### 7.4. Group By with COUNT - Sales Analytics
